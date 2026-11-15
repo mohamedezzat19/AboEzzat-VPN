@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
  * a VPN interface by itself.
  */
 class DnsUdpTcpBridge(
-    private val forwarder: DnsTcpForwarder = DnsTcpForwarder(),
+    private val forwarder: DnsRequestForwarder = DnsTcpForwarder(),
     private val maxConcurrentRequests: Int = DEFAULT_MAX_CONCURRENT_REQUESTS,
     private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY
 ) : AutoCloseable {
@@ -63,7 +63,7 @@ class DnsUdpTcpBridge(
         resolverHost: String,
         protectSocket: ((Socket) -> Boolean)? = null
     ): InetSocketAddress = synchronized(lock) {
-        check(!running) { "DNS UDP bridge is already running." }
+        check(!running && datagramSocket == null) { "DNS UDP bridge is already running or still shutting down." }
         require(resolverHost.isNotBlank() && !resolverHost.any(Char::isWhitespace)) {
             "A resolver hostname or IP is required."
         }
@@ -84,12 +84,13 @@ class DnsUdpTcpBridge(
             datagramSocket = socket
             executor = pool
             running = true
-            worker = Thread({
+            val receiveThread = Thread({
                 receiveLoop(socket, pool, profile, resolverHost, protectSocket)
             }, "AboEzzat-DNS-UDP-Bridge").apply {
                 isDaemon = true
-                start()
             }
+            worker = receiveThread
+            receiveThread.start()
             InetSocketAddress(InetAddress.getByName(LOOPBACK_HOST), socket.localPort)
         } catch (error: Exception) {
             running = false
@@ -144,7 +145,16 @@ class DnsUdpTcpBridge(
                 }
             }
         } finally {
-            running = false
+            synchronized(lock) {
+                if (datagramSocket === socket) {
+                    running = false
+                    datagramSocket = null
+                    executor = null
+                    worker = null
+                }
+            }
+            pool.shutdownNow()
+            socket.close()
         }
     }
 
