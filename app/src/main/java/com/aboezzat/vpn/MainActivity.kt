@@ -133,8 +133,8 @@ private fun Dashboard(store: ProxyProfileStore) {
     val testResults = remember { mutableStateMapOf<String, ProxyTestResult>() }
     val testing = remember { mutableStateMapOf<String, Boolean>() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    var tunnelActive by remember { mutableStateOf(false) }
-    var tunnelStatus by remember { mutableStateOf("Not connected") }
+    var tunnelActive by remember { mutableStateOf(AboEzzatVpnService.isTunnelRunning()) }
+    var tunnelStatus by remember { mutableStateOf(if (tunnelActive) "Tunnel active" else "Not connected") }
     val tunnelResultReceiver = remember(mainHandler) {
         object : ResultReceiver(mainHandler) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
@@ -560,6 +560,7 @@ private fun tx(english: String): String {
 private val arabicUi = mapOf(
     "CONNECTION STATUS" to "حالة الاتصال",
     "Not connected" to "غير متصل",
+    "Tunnel active" to "النفق نشط",
     "TUN established. Starting the upstream proxy tunnel." to "تم إنشاء واجهة TUN. جارٍ تشغيل نفق البروكسي الأصلي.",
     "Tunnel is already stopped." to "النفق متوقف بالفعل.",
     "Tunnel stop requested. Waiting for native cleanup." to "تم طلب إيقاف النفق. جارٍ انتظار إنهاء المحرك وتنظيف الموارد.",
