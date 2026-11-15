@@ -42,10 +42,12 @@ run/stop lifetime ordering.
 
 ## Android build prerequisites for the native phase
 
-The current GitHub Actions workflow builds only the Android/Kotlin project.
-The native phase will need a pinned Rust toolchain (at least 1.90), Android
-NDK, Android Rust targets for each shipped ABI, and a reproducible Cargo build.
-The resulting shared/static libraries must be packaged and verified in the APK.
+The current GitHub Actions workflow now builds the Android/Kotlin app and the
+app-owned C++ JNI callback library with a pinned Android NDK and CMake. It does
+not yet build Rust. The engine phase still needs a pinned Rust toolchain (at
+least 1.90), Android Rust targets for each shipped ABI, and a reproducible
+Cargo build. The patched engine must then be linked with the JNI library and
+verified inside the APK.
 
 ## Feature gate
 
