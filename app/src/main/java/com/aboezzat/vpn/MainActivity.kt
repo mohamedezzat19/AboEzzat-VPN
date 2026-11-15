@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
 private fun Dashboard(store: ProxyProfileStore) {
     val profiles = remember { mutableStateListOf<ProxyProfile>().apply { addAll(store.loadProfiles()) } }
     val context = LocalContext.current
+    var notice by remember { mutableStateOf("") }
     var vpnPermissionGranted by remember { mutableStateOf(VpnService.prepare(context) == null) }
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -118,7 +119,6 @@ private fun Dashboard(store: ProxyProfileStore) {
     var editorProfile by remember { mutableStateOf<ProxyProfile?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editorError by remember { mutableStateOf("") }
-    var notice by remember { mutableStateOf("") }
     val testResults = remember { mutableStateMapOf<String, ProxyTestResult>() }
     val testing = remember { mutableStateMapOf<String, Boolean>() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
