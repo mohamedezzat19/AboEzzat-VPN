@@ -49,7 +49,8 @@ class DnsUdpTcpBridgeTest {
                 port = proxyServer.localPort,
                 protocol = ProxyProtocol.HTTP_CONNECT
             )
-            DnsUdpTcpBridge().use { bridge ->
+            val bridge = DnsUdpTcpBridge()
+            bridge.use {
                 val local = bridge.start(profile, "resolver.test")
                 assertEqualsLoopback(local.address.hostAddress)
                 DatagramSocket().use { client ->
@@ -66,7 +67,7 @@ class DnsUdpTcpBridgeTest {
                 assertTrue(bridge.stats().forwarded >= 1)
                 assertTrue(bridge.isRunning)
             }
-            assertFalse(false)
+            assertFalse(bridge.isRunning)
             executor.shutdownNow()
         }
     }
