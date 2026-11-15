@@ -3,6 +3,9 @@ package com.aboezzat.vpn
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
@@ -29,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +44,11 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SettingsEthernet
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -146,6 +155,7 @@ private fun Dashboard(store: ProxyProfileStore) {
         mutableStateMapOf<String, RouteMode>().apply { putAll(routeStore.load()) }
     }
     var routeSearch by remember { mutableStateOf("") }
+    var showAppsPage by remember { mutableStateOf(false) }
     var selectedRouteApp by remember { mutableStateOf<LaunchableApp?>(null) }
     var activeName by remember { mutableStateOf(store.activeProfileName()) }
     var editorProfile by remember { mutableStateOf<ProxyProfile?>(null) }
@@ -550,48 +560,107 @@ private fun Dashboard(store: ProxyProfileStore) {
                 Text(tx(notice), color = Accent, fontSize = 12.sp)
             }
 
-            Text(tx("PER-APP ROUTING POLICIES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(tx("Choose a route for each installed app. These policies are saved, but the current tunnel mode still routes the whole device through the selected proxy."),
-                color = Muted, fontSize = 11.sp, lineHeight = 17.sp
-            )
-            OutlinedTextField(
-                value = routeSearch,
-                onValueChange = { routeSearch = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(tx("Search installed apps")) },
-                singleLine = true
-            )
-            Text("${installedApps.size} ${tx("installed apps found")}", color = Muted, fontSize = 10.sp)
-            installedApps.filter { it.label.contains(routeSearch, ignoreCase = true) || it.packageName.contains(routeSearch, ignoreCase = true) }
-                .forEach { app ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = Panel)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(app.label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                Text(app.packageName, color = Muted, fontSize = 9.sp)
-                            }
-                            TextButton(onClick = { selectedRouteApp = app }) {
-                                Text((appRoutes[app.packageName] ?: RouteMode.PROXY_ONLY).displayName(), color = Accent, fontSize = 10.sp)
-                            }
+            Card(
+                modifier = Modifier.fillMaxWidth().clickable { showAppsPage = true },
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Panel)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(18.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF20344A), modifier = Modifier.size(52.dp)) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("▦", color = Accent, fontSize = 27.sp, fontWeight = FontWeight.Bold)
                         }
                     }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(tx("Apps & routing"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("${installedApps.size} ${tx("installed apps")} · ${tx("Manage app routes")}", color = Muted, fontSize = 11.sp)
+                    }
+                    Text("›", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Light)
                 }
-            InfoCard(
-                "Banking mode · manual policy",
-                "For banking apps such as Tabby, choose Direct bypass on that app's row. This is a saved policy only and does not guarantee a bank will accept the connection."
-            )
-            Text(tx("Per-app policies are not enforced by the current whole-device tunnel. Banking bypass and mixed routing will be enabled in a later routing-engine stage."),
-                color = Muted, fontSize = 11.sp, lineHeight = 17.sp
-            )
+            }
             Spacer(Modifier.height(12.dp))
             Text(tx("ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL"), color = Muted, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+        }
+    }
+
+    if (showAppsPage) {
+        Dialog(
+            onDismissRequest = { showAppsPage = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { showAppsPage = false }) {
+                            Text("‹", color = Accent, fontSize = 30.sp)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(tx("APPLICATION ROUTING"), color = Accent, fontSize = 10.sp, letterSpacing = 1.6.sp, fontWeight = FontWeight.Bold)
+                            Text(tx("Installed apps"), color = Color.White, fontSize = 23.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+                        Text("${installedApps.size}", color = Muted, fontSize = 13.sp)
+                    }
+                    OutlinedTextField(
+                        value = routeSearch,
+                        onValueChange = { routeSearch = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(tx("Search installed apps")) },
+                        singleLine = true
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        val filteredApps = installedApps.filter {
+                            it.label.contains(routeSearch, ignoreCase = true) ||
+                                it.packageName.contains(routeSearch, ignoreCase = true)
+                        }
+                        AppRouteGroup(
+                            title = "Proxy only",
+                            subtitle = "Uses the first phone's upstream proxy",
+                            mode = RouteMode.PROXY_ONLY,
+                            apps = filteredApps.filter { (appRoutes[it.packageName] ?: RouteMode.PROXY_ONLY) == RouteMode.PROXY_ONLY },
+                            onSelect = { selectedRouteApp = it }
+                        )
+                        AppRouteGroup(
+                            title = "Proxy + VPN",
+                            subtitle = "Proxy first, then the optional VPN route",
+                            mode = RouteMode.PROXY_THEN_VPN,
+                            apps = filteredApps.filter { appRoutes[it.packageName] == RouteMode.PROXY_THEN_VPN },
+                            onSelect = { selectedRouteApp = it }
+                        )
+                        AppRouteGroup(
+                            title = "Direct · no Proxy / VPN",
+                            subtitle = "Uses the normal device network",
+                            mode = RouteMode.DIRECT,
+                            apps = filteredApps.filter { appRoutes[it.packageName] == RouteMode.DIRECT },
+                            onSelect = { selectedRouteApp = it }
+                        )
+                        AppRouteGroup(
+                            title = "VPN only",
+                            subtitle = "Uses the VPN route without the upstream proxy",
+                            mode = RouteMode.VPN_ONLY,
+                            apps = filteredApps.filter { appRoutes[it.packageName] == RouteMode.VPN_ONLY },
+                            onSelect = { selectedRouteApp = it }
+                        )
+                        InfoCard(
+                            "Routing engine status",
+                            "These choices are saved on this phone, but per-app traffic enforcement is not active yet. The current tunnel still routes the whole device through the selected upstream proxy."
+                        )
+                        InfoCard(
+                            "Banking mode · manual policy",
+                            "For banking apps such as Tabby, choose Direct bypass. This saved preference does not guarantee that a bank will accept the connection."
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -955,7 +1024,75 @@ private fun ProfileEditorDialog(
 }
 
 
-private data class LaunchableApp(val label: String, val packageName: String)
+private data class LaunchableApp(
+    val label: String,
+    val packageName: String,
+    val icon: Drawable
+)
+
+@Composable
+private fun AppRouteGroup(
+    title: String,
+    subtitle: String,
+    mode: RouteMode,
+    apps: List<LaunchableApp>,
+    onSelect: (LaunchableApp) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(tx(title), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(tx(subtitle), color = Muted, fontSize = 10.sp)
+            }
+            Surface(shape = CircleShape, color = Color(0xFF20344A)) {
+                Text(apps.size.toString(), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+            }
+        }
+        if (apps.isEmpty()) {
+            Text(tx("No apps in this group"), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp))
+        } else {
+            apps.forEach { app ->
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { onSelect(app) },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Panel)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val iconBitmap = remember(app.packageName) { drawableToBitmap(app.icon).asImageBitmap() }
+                        Image(
+                            bitmap = iconBitmap,
+                            contentDescription = app.label,
+                            modifier = Modifier.size(42.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(app.label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            Text(app.packageName, color = Muted, fontSize = 9.sp, maxLines = 1)
+                        }
+                        Text((appRoutesLabel(mode)), color = Accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun appRoutesLabel(mode: RouteMode): String = mode.displayName()
+
+private fun drawableToBitmap(drawable: Drawable): Bitmap {
+    val width = drawable.intrinsicWidth.coerceAtLeast(1)
+    val height = drawable.intrinsicHeight.coerceAtLeast(1)
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    drawable.setBounds(0, 0, canvas.width, canvas.height)
+    drawable.draw(canvas)
+    return bitmap
+}
 
 private fun loadLaunchableApps(context: android.content.Context): List<LaunchableApp> {
     val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -965,7 +1102,8 @@ private fun loadLaunchableApps(context: android.content.Context): List<Launchabl
             if (packageName == context.packageName) return@mapNotNull null
             LaunchableApp(
                 label = info.loadLabel(context.packageManager)?.toString()?.ifBlank { packageName } ?: packageName,
-                packageName = packageName
+                packageName = packageName,
+                icon = info.loadIcon(context.packageManager)
             )
         }
         .distinctBy { it.packageName }
