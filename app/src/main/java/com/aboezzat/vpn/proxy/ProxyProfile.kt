@@ -16,10 +16,10 @@ data class ProxyProfile(
 ) {
     fun validate(): String? = when {
         name.isBlank() -> "Profile name is required"
-        host.isBlank() -> "Server address is required"
+        host.isBlank() || host.any(Char::isWhitespace) -> "Enter a valid server IP or hostname"
         port !in 1..65535 -> "Port must be between 1 and 65535"
-        (username == null) != (password == null) ->
-            "Username and password must be provided together"
+        (username.isNullOrBlank()) != (password.isNullOrBlank()) ->
+            "Username and password must both be provided, or both left empty"
         else -> null
     }
 }
