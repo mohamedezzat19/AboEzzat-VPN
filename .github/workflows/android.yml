@@ -1,9 +1,7 @@
-name: Android Build
+name: Android Release Build
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
     branches: [ "main" ]
   workflow_dispatch:
 
@@ -11,12 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: abo-vpn-android-${{ github.ref }}
+  group: abo-vpn-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build debug APK
+  release:
+    name: Build signed Release APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,9 +32,8 @@ jobs:
           toolchain: 1.90.0
           components: rustfmt
 
-      - name: Test vendored tun2proxy core
-        run: |
-          cargo test --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features
+      - name: Test tun2proxy core
+        run: cargo test --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features
 
       - name: Check Rust engine for Android ABIs
         run: |
@@ -50,7 +47,7 @@ jobs:
         with:
           packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018 cmake;3.22.1"
 
-      - name: Build patched tun2proxy for Android ABIs
+      - name: Build tun2proxy for Android ABIs
         run: |
           NDK_BIN="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK_BIN/aarch64-linux-android26-clang" cargo build --manifest-path native/tun2proxy/Cargo.toml --lib --release --no-default-features --features udpgw --target aarch64-linux-android
@@ -62,13 +59,43 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Build Release APK
+        run: gradle :app:testReleaseUnitTest :app:assembleRelease
 
-      - name: Build debug APK
-        run: gradle :app:testDebugUnitTest :app:assembleDebug
+      - name: Check signing configuration
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret: $name"
+              exit 1
+            fi
+          done
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aboezzat-release.jks"
+          test -s "$RUNNER_TEMP/aboezzat-release.jks"
 
-      - name: Upload APK
+      - name: Align and sign Release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/app-release-aligned.apk"
+          SIGNED="app/build/outputs/apk/release/app-release.apk"
+          test -s "$UNSIGNED"
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign --ks "$RUNNER_TEMP/aboezzat-release.jks" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD --out "$SIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$SIGNED"
+
+      - name: Upload signed Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: AboEzzat-VPN-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: AboEzzat-VPN-Release
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
