@@ -18,7 +18,7 @@ class Ipv4TcpPacketParserTest {
         assertEquals(443, parsed.tuple.remote.port)
         assertEquals(0xf1234567L, parsed.sequenceNumber)
         assertEquals(0x89abcdefL, parsed.acknowledgementNumber)
-        assertEquals(0x5018, parsed.flags)
+        assertEquals(0x18, parsed.flags)
         assertTrue(parsed.isPsh)
         assertTrue(parsed.isAck)
         assertFalse(parsed.isSyn)
