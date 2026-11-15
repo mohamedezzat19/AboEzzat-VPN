@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -318,7 +319,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     ) {
                         ConnectionCircle(
                             title = "Proxy",
-                            connected = proxyConnected,
+                            connected = if (proxyStatus == "Not tested") null else proxyConnected,
                             connecting = proxyTesting,
                             onClick = {
                                 val profile = profiles.firstOrNull { it.name == activeName }
@@ -344,7 +345,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     }
                     Text(
                         tx(if (proxyTesting) "Testing proxy connection…" else proxyStatus),
-                        color = if (proxyTesting) Muted else if (proxyConnected) Color(0xFF54D98C) else Color(0xFFFF7777),
+                        color = if (proxyTesting || proxyStatus == "Not tested") Muted else if (proxyConnected) Color(0xFF54D98C) else Color(0xFFFF7777),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -820,14 +821,15 @@ private val arabicUi = mapOf(
 @Composable
 private fun ConnectionCircle(
     title: String,
-    connected: Boolean,
+    connected: Boolean?,
     connecting: Boolean,
     onClick: () -> Unit
 ) {
     val stateColor = when {
         connecting -> Color(0xFF4D91E8)
-        connected -> Color(0xFF168B55)
-        else -> Color(0xFFB93643)
+        connected == true -> Color(0xFF168B55)
+        connected == false -> Color(0xFFB93643)
+        else -> Color.Transparent
     }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -836,7 +838,8 @@ private fun ConnectionCircle(
         Surface(
             modifier = Modifier.size(86.dp).clickable(enabled = !connecting, onClick = onClick),
             shape = CircleShape,
-            color = stateColor
+            color = stateColor,
+            border = if (connected == null && !connecting) BorderStroke(2.dp, Color(0xFF718096)) else null
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (connecting) {
@@ -846,22 +849,25 @@ private fun ConnectionCircle(
                         strokeWidth = 3.dp
                     )
                 } else {
-                    Text(
-                        if (connected) "✓" else "×",
-                        color = Color.White,
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
+                    if (connected != null) {
+                        Text(
+                            if (connected) "✓" else "×",
+                            color = Color.White,
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
                 }
             }
         }
         Text(tx(title), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         Text(
-            tx(if (connecting) "Connecting…" else if (connected) "Connected" else "Disconnected"),
+            tx(if (connecting) "Connecting…" else if (connected == true) "Connected" else if (connected == false) "Disconnected" else "Not tested"),
             color = when {
                 connecting -> Color(0xFF79B5FF)
-                connected -> Color(0xFF54D98C)
-                else -> Color(0xFFFF7777)
+                connected == true -> Color(0xFF54D98C)
+                connected == false -> Color(0xFFFF7777)
+                else -> Muted
             },
             fontSize = 11.sp
         )
