@@ -622,17 +622,19 @@ private fun loadLaunchableApps(context: android.content.Context): List<Launchabl
 }
 
 @Composable
+@Composable
 private fun RouteMode.displayName(): String = when (this) {
-    RouteMode.VPN_ONLY -> "VPN only"
-    RouteMode.PROXY_ONLY -> "Original proxy"
-    RouteMode.PROXY_THEN_VPN -> "Proxy → VPN"
-    RouteMode.DIRECT -> "Direct bypass"
+    RouteMode.VPN_ONLY -> tx("VPN only")
+    RouteMode.PROXY_ONLY -> tx("Original proxy")
+    RouteMode.PROXY_THEN_VPN -> tx("Proxy → VPN")
+    RouteMode.DIRECT -> tx("Direct bypass")
 }
 
 @Composable
+@Composable
 private fun RouteMode.description(): String = when (this) {
-    RouteMode.VPN_ONLY -> "Route through the VPN tunnel"
-    RouteMode.PROXY_ONLY -> "Use the first phone's proxy"
-    RouteMode.PROXY_THEN_VPN -> "Send through proxy, then VPN"
-    RouteMode.DIRECT -> "Use the normal network directly"
+    RouteMode.VPN_ONLY -> tx("Route through the VPN tunnel")
+    RouteMode.PROXY_ONLY -> tx("Use the first phone's proxy")
+    RouteMode.PROXY_THEN_VPN -> tx("Send through proxy, then VPN")
+    RouteMode.DIRECT -> tx("Use the normal network directly")
 }
