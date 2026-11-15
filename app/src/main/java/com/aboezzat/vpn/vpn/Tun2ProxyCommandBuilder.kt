@@ -29,6 +29,7 @@ internal object Tun2ProxyCommandBuilder {
         val proxyUrl = "$scheme://$auth$host:${profile.port}"
 
         val arguments = listOf(
+            "tun2proxy-bin",
             "--tun-fd", tunFd.toString(),
             "--close-fd-on-drop", "false",
             "--proxy", proxyUrl,
