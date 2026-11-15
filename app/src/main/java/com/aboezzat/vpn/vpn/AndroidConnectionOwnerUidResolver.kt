@@ -34,11 +34,11 @@ sealed interface ConnectionOwnerUidResult {
  * for connections covered by that VPN. It must not be used as a guess when
  * the platform cannot provide an owner UID.
  */
-class AndroidConnectionOwnerUidResolver(context: Context) {
+class AndroidConnectionOwnerUidResolver(context: Context) : ConnectionOwnerUidProvider {
     private val connectivityManager =
         context.applicationContext.getSystemService(ConnectivityManager::class.java)
 
-    fun resolve(tuple: NetworkConnectionTuple): ConnectionOwnerUidResult {
+    override fun resolve(tuple: NetworkConnectionTuple): ConnectionOwnerUidResult {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             return ConnectionOwnerUidResult.UnsupportedAndroidVersion
         }
