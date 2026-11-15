@@ -8,6 +8,10 @@ The current Kotlin packet parsers and flow tracker remain useful for validation 
 
 ## Candidate
 
+Pinned proof-of-concept release: 2.20.0 (2026-11-13).
+
+- Android AAR: hev-socks5-tunnel.aar (617,551 bytes).
+- Published SHA-256: ae8a2e96b80b4eccccd037805a4bb4a278090c89dbcae8bc6fcb7634e9a255b9.
 - Project: https://github.com/heiher/hev-socks5-tunnel
 - Android app reference: https://github.com/heiher/sockstun
 - License reported by both repositories: MIT.
