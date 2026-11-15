@@ -68,6 +68,11 @@ class DnsUdpTcpBridgeTest {
                 assertTrue(bridge.isRunning)
             }
             assertFalse(bridge.isRunning)
+            val restarted = bridge.start(profile, "resolver.test")
+            assertEqualsLoopback(restarted.address.hostAddress)
+            assertTrue(bridge.isRunning)
+            bridge.close()
+            assertFalse(bridge.isRunning)
             executor.shutdownNow()
         }
     }
