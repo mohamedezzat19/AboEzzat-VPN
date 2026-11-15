@@ -63,7 +63,7 @@ class Ipv4UdpDnsPacketLoopTest {
         val loop = Ipv4UdpDnsPacketLoop(
             source = source,
             sink = DnsPacketSink { throw AssertionError("No packet expected") },
-            processor = Ipv4UdpDnsPacketProcessor { it }
+            processor = Ipv4UdpDnsPacketProcessor(resolver = DnsPacketResolver { it })
         )
 
         loop.stop()
