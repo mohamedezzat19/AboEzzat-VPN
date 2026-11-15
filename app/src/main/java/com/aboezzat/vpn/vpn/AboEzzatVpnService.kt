@@ -23,6 +23,16 @@ class AboEzzatVpnService : VpnService() {
     private val testExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "upstream-proxy-preflight")
     }
+    private var nativeBridgeBound = false
+
+    override fun onCreate() {
+        super.onCreate()
+        nativeBridgeBound = try {
+            NativeSocketProtectorBridge.nativeBindService(this)
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action != ACTION_TEST_UPSTREAM_PROXY) {
