@@ -22,7 +22,7 @@ class TcpFlowLifecycleTrackerTest {
         val ack = parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_ACK))
         val third = tracker.observe(ack, TcpFlowLifecycleTracker.Direction.OUTBOUND, 30)
         assertEquals(TcpFlowLifecycleTracker.State.ESTABLISHED, (third as TcpFlowLifecycleTracker.ObserveResult.Updated).snapshot.state)
-        assertEquals(3L, (third).snapshot.packetsSeen)
+        assertEquals(3L, third.snapshot.packetsSeen)
     }
 
     @Test
@@ -60,6 +60,64 @@ class TcpFlowLifecycleTrackerTest {
         assertEquals(0, tracker.prune(219))
         assertEquals(1, tracker.prune(220))
         assertTrue(tracker.snapshot().isEmpty())
+    }
+
+    @Test
+    fun closingFlowsArePrunedAfterRetention() {
+        val tracker = TcpFlowLifecycleTracker(closedRetentionMillis = 50)
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 100
+        )
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_FIN or Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 110
+        )
+        val closing = tracker.observe(
+            parse(tcpPacket(outbound = false, flags = Ipv4TcpPacketParser.FLAG_FIN or Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.INBOUND, 120
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        assertEquals(TcpFlowLifecycleTracker.State.CLOSING, closing.snapshot.state)
+        assertEquals(0, tracker.prune(169))
+        assertEquals(1, tracker.prune(170))
+        assertTrue(tracker.snapshot().isEmpty())
+    }
+
+    @Test
+    fun newSynReplacesTerminalFlowWhenFourTupleIsReused() {
+        val tracker = TcpFlowLifecycleTracker(closedRetentionMillis = 10_000)
+        val first = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 10
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_RST)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 11
+        )
+
+        val second = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 12
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+
+        assertEquals(first.snapshot.key, second.snapshot.key)
+        assertEquals(12L, second.snapshot.createdAtMillis)
+        assertEquals(1L, second.snapshot.packetsSeen)
+        assertEquals(TcpFlowLifecycleTracker.State.SYN_SENT, second.snapshot.state)
+    }
+
+    @Test
+    fun delayedObservationDoesNotMoveLastSeenTimestampBackwards() {
+        val tracker = TcpFlowLifecycleTracker()
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 20
+        )
+        val result = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 10
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        assertEquals(20L, result.snapshot.lastSeenAtMillis)
     }
 
     @Test

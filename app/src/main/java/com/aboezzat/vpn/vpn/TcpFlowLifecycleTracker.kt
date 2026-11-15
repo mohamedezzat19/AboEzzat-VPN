@@ -21,8 +21,7 @@ class TcpFlowLifecycleTracker(
         LOCAL_HALF_CLOSED,
         REMOTE_HALF_CLOSED,
         CLOSING,
-        CLOSED,
-        REJECTED
+        CLOSED
     }
 
     data class FlowKey(
@@ -97,11 +96,19 @@ class TcpFlowLifecycleTracker(
             )
         }
 
+        val isNewOutboundSyn = direction == Direction.OUTBOUND &&
+            packet.isSyn && !packet.isAck && !packet.isRst
         var flow = flows[key]
+
+        // A terminal diagnostic record must not absorb a new TCP connection
+        // that reuses the same four-tuple.
+        if (flow != null && isNewOutboundSyn && flow.state.isTerminal()) {
+            flows.remove(key)
+            flow = null
+        }
+
         if (flow == null) {
-            if (direction != Direction.OUTBOUND || !packet.isSyn || packet.isAck || packet.isRst) {
-                return ObserveResult.InvalidInitialPacket
-            }
+            if (!isNewOutboundSyn) return ObserveResult.InvalidInitialPacket
             if (flows.size >= maxFlows) return ObserveResult.CapacityReached
             flow = MutableFlow(
                 key = key,
@@ -112,11 +119,12 @@ class TcpFlowLifecycleTracker(
             flows[key] = flow
         }
 
-        flow.lastSeenAtMillis = nowMillis
+        // Keep timestamps monotonic if callers deliver delayed observations.
+        flow.lastSeenAtMillis = maxOf(flow.lastSeenAtMillis, nowMillis)
         flow.lastSequenceNumber = packet.sequenceNumber
         flow.lastAcknowledgementNumber = packet.acknowledgementNumber
-        flow.packetsSeen++
-        flow.payloadBytesSeen += packet.payload.size
+        flow.packetsSeen = saturatingAdd(flow.packetsSeen, 1)
+        flow.payloadBytesSeen = saturatingAdd(flow.payloadBytesSeen, packet.payload.size.toLong())
 
         if (packet.isRst) {
             flow.state = State.CLOSED
@@ -162,7 +170,8 @@ class TcpFlowLifecycleTracker(
         val iterator = flows.entries.iterator()
         while (iterator.hasNext()) {
             val flow = iterator.next().value
-            if (flow.state == State.CLOSED &&
+            if (flow.state.isTerminal() &&
+                nowMillis >= flow.lastSeenAtMillis &&
                 nowMillis - flow.lastSeenAtMillis >= closedRetentionMillis
             ) {
                 iterator.remove()
@@ -170,6 +179,11 @@ class TcpFlowLifecycleTracker(
         }
         return before - flows.size
     }
+
+    private fun State.isTerminal(): Boolean = this == State.CLOSING || this == State.CLOSED
+
+    private fun saturatingAdd(current: Long, increment: Long): Long =
+        if (Long.MAX_VALUE - current < increment) Long.MAX_VALUE else current + increment
 
     companion object {
         const val DEFAULT_MAX_FLOWS = 512
