@@ -193,31 +193,31 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
         packet_information == JNI_TRUE
     );
     env->ReleaseStringUTFChars(cli_args, chars);
-    // Clear a stop that raced with native shutdown after Rust dropped its
-    // cancellation token but before this JNI call marked the engine idle.
-    tun2proxy_clear_stop_request();
+    // Mark the native run idle before clearing a stop request that raced
+    // with Rust dropping its cancellation token. Stop calls serialize on the
+    // same mutex, so no late request can survive into the next run.
     {
         std::lock_guard<std::mutex> lock(g_engine_mutex);
         g_engine_running = false;
         g_engine_pending_start = false;
         g_engine_stop_requested = false;
     }
+    tun2proxy_clear_stop_request();
     return result;
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeStopEngine(
         JNIEnv*, jclass) {
-    {
-        std::lock_guard<std::mutex> lock(g_engine_mutex);
-        if (!g_engine_running) {
-            // Only queue a stop while Kotlin has armed a specific pending run.
-            if (g_engine_pending_start) {
-                g_engine_stop_requested = true;
-                return 0;
-            }
-            return -1;
+    std::lock_guard<std::mutex> lock(g_engine_mutex);
+    if (!g_engine_running) {
+        // Only queue a stop while Kotlin has armed a specific pending run.
+        if (g_engine_pending_start) {
+            g_engine_stop_requested = true;
+            return 0;
         }
+        return -1;
     }
+    // Serialize the Rust cancellation request with the transition to IDLE.
     return tun2proxy_stop();
 }
