@@ -133,6 +133,62 @@ private fun Dashboard(store: ProxyProfileStore) {
     val testResults = remember { mutableStateMapOf<String, ProxyTestResult>() }
     val testing = remember { mutableStateMapOf<String, Boolean>() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var tunnelActive by remember { mutableStateOf(false) }
+    var tunnelStatus by remember { mutableStateOf("Not connected") }
+    val tunnelResultReceiver = remember(mainHandler) {
+        object : ResultReceiver(mainHandler) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                tunnelStatus = resultData?.getString(AboEzzatVpnService.EXTRA_MESSAGE)
+                    ?: "Tunnel status updated."
+                when (resultCode) {
+                    AboEzzatVpnService.RESULT_STARTED, AboEzzatVpnService.RESULT_STOPPING -> tunnelActive = true
+                    AboEzzatVpnService.RESULT_STOPPED, AboEzzatVpnService.RESULT_FAILED -> tunnelActive = false
+                }
+                notice = tunnelStatus
+            }
+        }
+    }
+
+    fun sendTunnelCommand(action: String, profile: ProxyProfile? = null) {
+        val serviceIntent = Intent(context, AboEzzatVpnService::class.java).apply {
+            this.action = action
+            putExtra(AboEzzatVpnService.EXTRA_RESULT_RECEIVER, tunnelResultReceiver)
+            if (profile != null) {
+                putExtra(AboEzzatVpnService.EXTRA_NAME, profile.name)
+                putExtra(AboEzzatVpnService.EXTRA_HOST, profile.host)
+                putExtra(AboEzzatVpnService.EXTRA_PORT, profile.port)
+                putExtra(AboEzzatVpnService.EXTRA_PROTOCOL, profile.protocol.name)
+                putExtra(AboEzzatVpnService.EXTRA_USERNAME, profile.username)
+                putExtra(AboEzzatVpnService.EXTRA_PASSWORD, profile.password)
+                putExtra(AboEzzatVpnService.EXTRA_REMOTE_DNS, profile.remoteDns)
+            }
+        }
+        try {
+            if (action == AboEzzatVpnService.ACTION_START_TUNNEL) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } catch (error: Exception) {
+            notice = error.message ?: "Could not send the tunnel command."
+        }
+    }
+
+    fun connectSelectedProfile() {
+        val profile = profiles.firstOrNull { it.name == activeName }
+        if (profile == null) {
+            notice = "Add and select a proxy profile first."
+            return
+        }
+        val prepareIntent = VpnService.prepare(context)
+        if (prepareIntent != null) {
+            vpnPermissionLauncher.launch(prepareIntent)
+            notice = "Grant Android VPN permission, then tap Connect again."
+            return
+        }
+        vpnPermissionGranted = true
+        sendTunnelCommand(AboEzzatVpnService.ACTION_START_TUNNEL, profile)
+    }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
         Column(
@@ -162,11 +218,11 @@ private fun Dashboard(store: ProxyProfileStore) {
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text(tx("CONNECTION STATUS"), color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
-                    Text(tx("Not connected"), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Text(tx("Setup stage · No device traffic is routed or intercepted yet."),
+                    Text(tx(tunnelStatus), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(tx("The current tunnel sends device traffic through the selected upstream proxy."),
                         color = Muted, fontSize = 12.sp, lineHeight = 18.sp
                     )
-                    Text(tx("We are preparing and testing the upstream proxy before enabling the VPN tunnel."),
+                    Text(tx("Per-app routing rules are saved, but this first tunnel mode applies to the whole device."),
                         color = Accent, fontSize = 12.sp, lineHeight = 18.sp
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -194,9 +250,23 @@ private fun Dashboard(store: ProxyProfileStore) {
                             Text(tx(if (vpnPermissionGranted) "Check" else "Authorize"))
                         }
                     }
-                    Text(tx("This only checks Android consent. It does NOT connect, create a TUN interface, or redirect traffic."),
+                    Text(tx("Use Connect after selecting a working proxy profile. The tunnel stays active in the background with a notification."),
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { connectSelectedProfile() },
+                            enabled = !tunnelActive && profiles.any { it.name == activeName },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
+                        ) { Text(tx("Connect")) }
+                        Button(
+                            onClick = { sendTunnelCommand(AboEzzatVpnService.ACTION_STOP_TUNNEL) },
+                            enabled = tunnelActive,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34445F), contentColor = Color.White)
+                        ) { Text(tx("Disconnect")) }
+                    }
                 }
             }
 
@@ -359,7 +429,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             }
 
             Text(tx("PER-APP ROUTING POLICIES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(tx("Choose a route for each installed app. These choices are saved on this phone; enforcement remains disabled until the real packet engine is ready."),
+            Text(tx("Choose a route for each installed app. These policies are saved, but the current tunnel mode still routes the whole device through the selected proxy."),
                 color = Muted, fontSize = 11.sp, lineHeight = 17.sp
             )
             OutlinedTextField(
@@ -395,7 +465,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                 "Banking mode · manual policy",
                 "For banking apps such as Tabby, choose Direct bypass on that app's row. This is a saved policy only and does not guarantee a bank will accept the connection."
             )
-            Text(tx("Routing policies are saved but not active yet. The VPN service still does not create a TUN interface, so normal device traffic is not redirected."),
+            Text(tx("Per-app policies are not enforced by the current whole-device tunnel. Banking bypass and mixed routing will be enabled in a later routing-engine stage."),
                 color = Muted, fontSize = 11.sp, lineHeight = 17.sp
             )
             Spacer(Modifier.height(12.dp))
@@ -489,6 +559,32 @@ private fun tx(english: String): String {
 
 private val arabicUi = mapOf(
     "CONNECTION STATUS" to "حالة الاتصال",
+    "The current tunnel sends device traffic through the selected upstream proxy." to "النفق الحالي يمرر حركة مرور الجهاز عبر البروكسي المحدد.",
+    "Per-app routing rules are saved, but this first tunnel mode applies to the whole device." to "قواعد التوجيه لكل تطبيق محفوظة، لكن وضع النفق الأول يطبق على الجهاز بالكامل.",
+    "Use Connect after selecting a working proxy profile. The tunnel stays active in the background with a notification." to "اضغط اتصال بعد اختيار ملف بروكسي يعمل. سيظل النفق نشطًا في الخلفية مع إشعار واضح.",
+    "Choose a route for each installed app. These policies are saved, but the current tunnel mode still routes the whole device through the selected proxy." to "اختر مسارًا لكل تطبيق مثبت. تُحفظ السياسات، لكن وضع النفق الحالي يمرر حركة مرور الجهاز بالكامل عبر البروكسي المحدد.",
+    "Per-app policies are not enforced by the current whole-device tunnel. Banking bypass and mixed routing will be enabled in a later routing-engine stage." to "لا تُطبّق سياسات كل تطبيق في نفق الجهاز الحالي. سيتم تفعيل تجاوز التطبيقات البنكية والتوجيه المختلط في مرحلة لاحقة من محرك التوجيه.",
+    "Connect" to "اتصال",
+    "Disconnect" to "قطع الاتصال",
+    "Add and select a proxy profile first." to "أضف ملف بروكسي وحدده أولًا.",
+    "Grant Android VPN permission, then tap Connect again." to "امنح إذن VPN من Android ثم اضغط اتصال مرة أخرى.",
+    "Could not send the tunnel command." to "تعذر إرسال أمر النفق.",
+    "Tunnel status updated." to "تم تحديث حالة النفق.",
+    "A tunnel session is already active." to "توجد جلسة نفق نشطة بالفعل.",
+    "Native tunnel engine could not be loaded." to "تعذر تحميل محرك النفق الأصلي.",
+    "Android VPN permission is required." to "يلزم منح إذن VPN من Android.",
+    "Could not resolve the proxy server address." to "تعذر تحديد عنوان خادم البروكسي.",
+    "Android could not establish the TUN interface." to "تعذر على Android إنشاء واجهة TUN.",
+    "The selected proxy profile is not valid for the tunnel." to "ملف البروكسي المحدد غير صالح للنفق.",
+    "The native tunnel worker is not available." to "عامل تشغيل النفق الأصلي غير متاح.",
+    "TUN established. Starting the upstream proxy tunnel." to "تم إنشاء واجهة TUN. جارٍ تشغيل نفق البروكسي الأصلي.",
+    "Tunnel is already stopped." to "النفق متوقف بالفعل.",
+    "Tunnel stop requested. Waiting for native cleanup." to "تم طلب إيقاف النفق. جارٍ انتظار إنهاء المحرك وتنظيف الموارد.",
+    "The native engine did not accept the stop request." to "لم يقبل المحرك الأصلي طلب الإيقاف.",
+    "Tunnel stopped and native resources released." to "توقف النفق وتم تحرير موارد المحرك.",
+    "Tunnel engine exited." to "انتهى تشغيل محرك النفق.",
+    "Native tunnel stopped with error code" to "توقف محرك النفق برمز خطأ",
+
     "Android VPN permission granted. Tunnel is still OFF." to "تم منح إذن VPN من Android. النفق لا يزال متوقفًا.",
     "VPN permission was not granted." to "لم يتم منح إذن VPN.",
     "Android VPN permission already granted. Tunnel is still OFF." to "تم منح إذن VPN من Android بالفعل. النفق لا يزال متوقفًا.",
