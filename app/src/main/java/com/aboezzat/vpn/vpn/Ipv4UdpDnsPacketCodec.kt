@@ -1,6 +1,5 @@
 package com.aboezzat.vpn.vpn
 
-import java.net.InetAddress
 
 /**
  * Strict IPv4/UDP DNS packet codec for a future TUN packet loop.
@@ -36,7 +35,7 @@ object Ipv4UdpDnsPacketCodec {
         require(totalLength == packet.size && totalLength >= headerLength + UDP_HEADER_BYTES) {
             "IPv4 total length does not match the packet."
         }
-        require(checksum(packet, 0, headerLength) == 0xffff) { "Invalid IPv4 header checksum." }
+        require(checksum(packet, 0, headerLength) == 0) { "Invalid IPv4 header checksum." }
         require(u8(packet, 9) == UDP_PROTOCOL) { "IPv4 packet is not UDP." }
 
         val fragmentField = u16(packet, 6)
@@ -84,14 +83,13 @@ object Ipv4UdpDnsPacketCodec {
         require(dnsResponse.size in DnsTcpForwarder.DNS_HEADER_BYTES..DnsTcpForwarder.MAX_DNS_MESSAGE_BYTES) {
             "DNS response length is outside the supported range."
         }
-        require(DnsTcpForwarder.run {
-            try {
-                validateResponse(query.dnsPayload, dnsResponse)
-                true
-            } catch (_: Exception) {
-                false
-            }
-        }) { "DNS response does not match the original query." }
+        val validDnsResponse = try {
+            DnsTcpForwarder.validateResponse(query.dnsPayload, dnsResponse)
+            true
+        } catch (_: Exception) {
+            false
+        }
+        require(validDnsResponse) { "DNS response does not match the original query." }
 
         val ipHeaderLength = IPV4_MIN_HEADER_BYTES + query.ipOptions.size
         require(ipHeaderLength <= IPV4_MAX_HEADER_BYTES && ipHeaderLength % 4 == 0) {
@@ -138,7 +136,7 @@ object Ipv4UdpDnsPacketCodec {
         packet: ByteArray,
         offset: Int,
         length: Int
-    ): Boolean = udpChecksum(source, destination, packet, offset, length) == 0xffff
+    ): Boolean = udpChecksum(source, destination, packet, offset, length) == 0
 
     private fun udpChecksum(
         source: ByteArray,
