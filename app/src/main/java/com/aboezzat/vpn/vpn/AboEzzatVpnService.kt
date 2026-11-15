@@ -194,14 +194,6 @@ class AboEzzatVpnService : VpnService() {
 
         activeReceiver = receiver
         stopRequested = false
-        tunnelRunning = true
-        receiver?.send(
-            RESULT_STARTED,
-            Bundle().apply {
-                putBoolean(EXTRA_SUCCESS, true)
-                putString(EXTRA_MESSAGE, "TUN established. Starting the upstream proxy tunnel.")
-            }
-        )
         val accepted = tunnelRunner.start(
             cliArgs = command,
             mtu = TUN_MTU,
@@ -217,6 +209,15 @@ class AboEzzatVpnService : VpnService() {
             return
         }
 
+        // Only report the tunnel as running after the native worker accepted the session.
+        tunnelRunning = true
+        receiver?.send(
+            RESULT_STARTED,
+            Bundle().apply {
+                putBoolean(EXTRA_SUCCESS, true)
+                putString(EXTRA_MESSAGE, "Tunnel worker started. Upstream traffic will use ${profile.name}.")
+            }
+        )
         updateTunnelNotification("Tunnel active via ${profile.name}")
     }
 
