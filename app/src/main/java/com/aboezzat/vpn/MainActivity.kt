@@ -1,5 +1,6 @@
 package com.aboezzat.vpn
 
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -50,11 +51,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.aboezzat.vpn.data.ProxyProfileStore
+import com.aboezzat.vpn.data.AppRouteStore
+import com.aboezzat.vpn.core.RouteMode
 import com.aboezzat.vpn.proxy.ProxyProfile
 import com.aboezzat.vpn.proxy.ProxyProtocol
 import com.aboezzat.vpn.proxy.ProxyConnectionTester
@@ -85,6 +89,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Dashboard(store: ProxyProfileStore) {
     val profiles = remember { mutableStateListOf<ProxyProfile>().apply { addAll(store.loadProfiles()) } }
+    val context = LocalContext.current
+    val routeStore = remember(context) { AppRouteStore(context) }
+    val installedApps = remember(context) {
+        mutableStateListOf<LaunchableApp>().apply { addAll(loadLaunchableApps(context)) }
+    }
+    val appRoutes = remember(routeStore) {
+        mutableStateMapOf<String, RouteMode>().apply { putAll(routeStore.load()) }
+    }
+    var routeSearch by remember { mutableStateOf("") }
+    var selectedRouteApp by remember { mutableStateOf<LaunchableApp?>(null) }
     var activeName by remember { mutableStateOf(store.activeProfileName()) }
     var editorProfile by remember { mutableStateOf<ProxyProfile?>(null) }
     var showEditor by remember { mutableStateOf(false) }
@@ -241,16 +255,80 @@ private fun Dashboard(store: ProxyProfileStore) {
                 Text(notice, color = Accent, fontSize = 12.sp)
             }
 
-            Text("ROUTING FEATURES", color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
-            InfoCard("Per-app routing", "VPN only · Proxy only · Proxy then VPN · Direct bypass")
-            InfoCard("Banking mode", "A separate direct route policy for selected banking apps")
+            Text("PER-APP ROUTING POLICIES", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             Text(
-                "Important: profile management is available now. Connection testing and the real VPN packet engine are the next stages.",
+                "Choose a route for each installed app. These choices are saved on this phone; enforcement remains disabled until the real packet engine is ready.",
+                color = Muted, fontSize = 11.sp, lineHeight = 17.sp
+            )
+            OutlinedTextField(
+                value = routeSearch,
+                onValueChange = { routeSearch = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Search installed apps") },
+                singleLine = true
+            )
+            Text("${installedApps.size} launchable apps found", color = Muted, fontSize = 10.sp)
+            installedApps.filter { it.label.contains(routeSearch, ignoreCase = true) || it.packageName.contains(routeSearch, ignoreCase = true) }
+                .forEach { app ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = Panel)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(app.label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Text(app.packageName, color = Muted, fontSize = 9.sp)
+                            }
+                            TextButton(onClick = { selectedRouteApp = app }) {
+                                Text((appRoutes[app.packageName] ?: RouteMode.VPN_ONLY).displayName(), color = Accent, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            InfoCard(
+                "Banking mode · manual policy",
+                "For banking apps such as Tabby, choose Direct bypass on that app's row. This is a saved policy only and does not guarantee a bank will accept the connection."
+            )
+            Text(
+                "Routing policies are saved but not active yet. The VPN service still does not create a TUN interface, so normal device traffic is not redirected.",
                 color = Muted, fontSize = 11.sp, lineHeight = 17.sp
             )
             Spacer(Modifier.height(12.dp))
             Text("ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         }
+    }
+
+    selectedRouteApp?.let { app ->
+        AlertDialog(
+            onDismissRequest = { selectedRouteApp = null },
+            containerColor = Panel,
+            title = { Text("Route for ${app.label}", color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    RouteMode.values().forEach { mode ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(
+                                selected = (appRoutes[app.packageName] ?: RouteMode.VPN_ONLY) == mode,
+                                onClick = {
+                                    appRoutes[app.packageName] = mode
+                                    routeStore.save(appRoutes.toMap())
+                                    selectedRouteApp = null
+                                }
+                            )
+                            Column {
+                                Text(mode.displayName(), color = Color.White, fontSize = 13.sp)
+                                Text(mode.description(), color = Muted, fontSize = 10.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedRouteApp = null }) { Text("Close", color = Accent) } }
+        )
     }
 
     if (showEditor) {
@@ -364,4 +442,36 @@ private fun ProfileEditorDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Muted) } }
     )
+}
+
+
+private data class LaunchableApp(val label: String, val packageName: String)
+
+private fun loadLaunchableApps(context: android.content.Context): List<LaunchableApp> {
+    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    return context.packageManager.queryIntentActivities(intent, 0)
+        .mapNotNull { info ->
+            val packageName = info.activityInfo?.packageName ?: return@mapNotNull null
+            if (packageName == context.packageName) return@mapNotNull null
+            LaunchableApp(
+                label = info.loadLabel(context.packageManager)?.toString()?.ifBlank { packageName } ?: packageName,
+                packageName = packageName
+            )
+        }
+        .distinctBy { it.packageName }
+        .sortedBy { it.label.lowercase() }
+}
+
+private fun RouteMode.displayName(): String = when (this) {
+    RouteMode.VPN_ONLY -> "VPN only"
+    RouteMode.PROXY_ONLY -> "Original proxy"
+    RouteMode.PROXY_THEN_VPN -> "Proxy → VPN"
+    RouteMode.DIRECT -> "Direct bypass"
+}
+
+private fun RouteMode.description(): String = when (this) {
+    RouteMode.VPN_ONLY -> "Route through the VPN tunnel"
+    RouteMode.PROXY_ONLY -> "Use the first phone's proxy"
+    RouteMode.PROXY_THEN_VPN -> "Send through proxy, then VPN"
+    RouteMode.DIRECT -> "Use the normal network directly"
 }
