@@ -24,6 +24,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Rust 1.90
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.90.0
+          components: rustfmt
+
+      - name: Test vendored tun2proxy core
+        run: |
+          cargo fmt --manifest-path native/tun2proxy/Cargo.toml -- --check
+          cargo test --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features
+
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
