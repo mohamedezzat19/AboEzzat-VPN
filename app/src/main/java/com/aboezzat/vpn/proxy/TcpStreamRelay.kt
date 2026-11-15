@@ -52,16 +52,17 @@ object TcpStreamRelay {
         internal fun submit(executor: ExecutorService, source: Socket, destination: Socket) {
             val task = executor.submit {
                 try {
-                    source.getInputStream().use { input ->
-                        val output = destination.getOutputStream()
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                        while (!closed.get()) {
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            if (count > 0) {
-                                output.write(buffer, 0, count)
-                                output.flush()
-                            }
+                    // Do not close the input stream here: SocketInputStream.close()
+                    // closes the whole socket and would break the reverse half-stream.
+                    val input = source.getInputStream()
+                    val output = destination.getOutputStream()
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (!closed.get()) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        if (count > 0) {
+                            output.write(buffer, 0, count)
+                            output.flush()
                         }
                     }
                     try {
