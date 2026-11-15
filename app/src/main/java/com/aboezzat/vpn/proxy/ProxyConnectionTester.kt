@@ -7,7 +7,6 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.charset.StandardCharsets
-import kotlin.system.measureTimeMillis
 
 data class ProxyTestResult(
     val success: Boolean,
@@ -25,7 +24,6 @@ object ProxyConnectionTester {
         profile.validate()?.let { return ProxyTestResult(false, it, 0) }
         var latency = 0L
         return try {
-            val message = measureTimeMillis { /* timing is captured below */ }
             val start = System.nanoTime()
             Socket().use { socket ->
                 socket.connect(InetSocketAddress(profile.host, profile.port), CONNECT_TIMEOUT_MS)
