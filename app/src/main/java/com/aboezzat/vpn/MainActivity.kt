@@ -6,7 +6,9 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.ResultReceiver
-import androidx.activity.ComponentActivity
+import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.os.LocaleListCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -57,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -74,7 +77,7 @@ private val Panel = Color(0xFF141F33)
 private val Accent = Color(0xFF62E6B5)
 private val Muted = Color(0xFF91A0B8)
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -137,6 +140,12 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Text("ABOEZZAT", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                     Text("VPN", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
                 }
+                TextButton(onClick = {
+                    val current = context.resources.configuration.locales[0].language
+                    AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(if (current == "ar") "en" else "ar"))
+                }) {
+                    Text(if (context.resources.configuration.locales[0].language == "ar") "English" else "العربية", color = Accent)
+                }
                 Icon(Icons.Rounded.Security, contentDescription = null, tint = Accent)
             }
 
@@ -146,19 +155,17 @@ private fun Dashboard(store: ProxyProfileStore) {
                 colors = CardDefaults.cardColors(containerColor = Panel)
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text("CONNECTION STATUS", color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
-                    Text("Not connected", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Setup stage · No device traffic is routed or intercepted yet.",
+                    Text(tx("CONNECTION STATUS"), color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
+                    Text(tx("Not connected"), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text(tx("Setup stage · No device traffic is routed or intercepted yet."),
                         color = Muted, fontSize = 12.sp, lineHeight = 18.sp
                     )
-                    Text(
-                        "We are preparing and testing the upstream proxy before enabling the VPN tunnel.",
+                    Text(tx("We are preparing and testing the upstream proxy before enabling the VPN tunnel."),
                         color = Accent, fontSize = 12.sp, lineHeight = 18.sp
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("Android VPN permission", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(tx("Android VPN permission"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(
                                 if (vpnPermissionGranted) "Permission granted · tunnel remains off"
                                 else "Permission required before a VPN can be started",
@@ -181,8 +188,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                             Text(if (vpnPermissionGranted) "Check" else "Authorize")
                         }
                     }
-                    Text(
-                        "This only checks Android consent. It does NOT connect, create a TUN interface, or redirect traffic.",
+                    Text(tx("This only checks Android consent. It does NOT connect, create a TUN interface, or redirect traffic."),
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
                 }
@@ -197,8 +203,8 @@ private fun Dashboard(store: ProxyProfileStore) {
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("PROXY PROFILES", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Text("Save the first phone's proxy connection details", color = Muted, fontSize = 11.sp)
+                    Text(tx("PROXY PROFILES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(tx("Save the first phone's proxy connection details"), color = Muted, fontSize = 11.sp)
                 }
                 Button(
                     onClick = {
@@ -209,7 +215,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
                 ) {
                     Icon(Icons.Rounded.Add, contentDescription = null)
-                    Text(" Add")
+                    Text(tx(" Add"))
                 }
             }
 
@@ -221,8 +227,8 @@ private fun Dashboard(store: ProxyProfileStore) {
                 ) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Icon(Icons.Rounded.SettingsEthernet, contentDescription = null, tint = Accent)
-                        Text("No proxy profiles yet", color = Color.White, fontWeight = FontWeight.SemiBold)
-                        Text("Add the IP address and port shown by Android Server Proxy on your first phone.", color = Muted, fontSize = 12.sp)
+                        Text(tx("No proxy profiles yet"), color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(tx("Add the IP address and port shown by Android Server Proxy on your first phone."), color = Muted, fontSize = 12.sp)
                     }
                 }
             }
@@ -323,8 +329,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         ) {
                             Text(if (testing[profile.name] == true) "Testing protected socket…" else "Test via VPN service")
                         }
-                        Text(
-                            "This runs the proxy handshake inside the VPN service and calls protect() before connect. No TUN tunnel or device traffic routing is active yet.",
+                        Text(tx("This runs the proxy handshake inside the VPN service and calls protect() before connect. No TUN tunnel or device traffic routing is active yet."),
                             color = Muted,
                             fontSize = 10.sp,
                             lineHeight = 14.sp
@@ -347,16 +352,15 @@ private fun Dashboard(store: ProxyProfileStore) {
                 Text(notice, color = Accent, fontSize = 12.sp)
             }
 
-            Text("PER-APP ROUTING POLICIES", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(
-                "Choose a route for each installed app. These choices are saved on this phone; enforcement remains disabled until the real packet engine is ready.",
+            Text(tx("PER-APP ROUTING POLICIES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text(tx("Choose a route for each installed app. These choices are saved on this phone; enforcement remains disabled until the real packet engine is ready."),
                 color = Muted, fontSize = 11.sp, lineHeight = 17.sp
             )
             OutlinedTextField(
                 value = routeSearch,
                 onValueChange = { routeSearch = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search installed apps") },
+                label = { Text(tx("Search installed apps")) },
                 singleLine = true
             )
             Text("${installedApps.size} launchable apps found", color = Muted, fontSize = 10.sp)
@@ -385,12 +389,11 @@ private fun Dashboard(store: ProxyProfileStore) {
                 "Banking mode · manual policy",
                 "For banking apps such as Tabby, choose Direct bypass on that app's row. This is a saved policy only and does not guarantee a bank will accept the connection."
             )
-            Text(
-                "Routing policies are saved but not active yet. The VPN service still does not create a TUN interface, so normal device traffic is not redirected.",
+            Text(tx("Routing policies are saved but not active yet. The VPN service still does not create a TUN interface, so normal device traffic is not redirected."),
                 color = Muted, fontSize = 11.sp, lineHeight = 17.sp
             )
             Spacer(Modifier.height(12.dp))
-            Text("ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
+            Text(tx("ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL"), color = Muted, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         }
     }
 
@@ -419,7 +422,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { selectedRouteApp = null }) { Text("Close", color = Accent) } }
+            confirmButton = { TextButton(onClick = { selectedRouteApp = null }) { Text(tx("Close"), color = Accent) } }
         )
     }
 
@@ -463,11 +466,69 @@ private fun Dashboard(store: ProxyProfileStore) {
 }
 
 @Composable
+private fun tx(english: String): String {
+    return if (LocalConfiguration.current.locales[0].language == "ar") arabicUi[english] ?: english else english
+}
+
+private val arabicUi = mapOf(
+    "CONNECTION STATUS" to "حالة الاتصال",
+    "Not connected" to "غير متصل",
+    "Setup stage · No device traffic is routed or intercepted yet." to "مرحلة الإعداد · لم يتم توجيه حركة مرور الجهاز بعد.",
+    "We are preparing and testing the upstream proxy before enabling the VPN tunnel." to "نجهز ونختبر البروكسي الأصلي قبل تفعيل نفق VPN.",
+    "Android VPN permission" to "إذن VPN من Android",
+    "Permission granted · tunnel remains off" to "تم منح الإذن · النفق متوقف",
+    "Permission required before a VPN can be started" to "يلزم منح الإذن قبل تشغيل VPN",
+    "This only checks Android consent. It does NOT connect, create a TUN interface, or redirect traffic." to "هذا يتحقق من إذن Android فقط، ولا ينشئ اتصالًا أو واجهة TUN ولا يوجّه حركة المرور.",
+    "PROXY PROFILES" to "ملفات البروكسي",
+    "Save the first phone's proxy connection details" to "احفظ بيانات بروكسي الهاتف الأول",
+    " Add" to " إضافة",
+    "No proxy profiles yet" to "لا توجد ملفات بروكسي بعد",
+    "Add the IP address and port shown by Android Server Proxy on your first phone." to "أدخل عنوان IP والمنفذ الظاهرين في Android Server Proxy على هاتفك الأول.",
+    "Saved credentials need attention" to "بيانات الاعتماد المحفوظة تحتاج مراجعة",
+    "Android could not read or decrypt saved proxy profile data. Existing data is protected from being overwritten. Restore the original app data and Android Keystore state before editing or saving profiles." to "تعذر على Android قراءة أو فك تشفير بيانات البروكسي. تمت حماية البيانات من الاستبدال. استعد بيانات التطبيق الأصلية وحالة Android Keystore قبل التعديل أو الحفظ.",
+    "No authentication" to "بدون مصادقة",
+    "Authentication saved securely" to "تم حفظ بيانات المصادقة بأمان",
+    "Testing protected socket…" to "جارٍ اختبار الاتصال المحمي…",
+    "Test via VPN service" to "اختبار عبر خدمة VPN",
+    "This runs the proxy handshake inside the VPN service and calls protect() before connect. No TUN tunnel or device traffic routing is active yet." to "يختبر هذا الاتصال بالبروكسي داخل خدمة VPN ويستدعي protect() قبل الاتصال. لا يوجد نفق TUN أو توجيه لحركة المرور حاليًا.",
+    "HANDSHAKE OK" to "نجاح المصافحة",
+    "FAILED" to "فشل",
+    "PER-APP ROUTING POLICIES" to "سياسات التوجيه لكل تطبيق",
+    "Choose a route for each installed app. These choices are saved on this phone; enforcement remains disabled until the real packet engine is ready." to "اختر مسارًا لكل تطبيق مثبت. تُحفظ الاختيارات على الهاتف، لكن تطبيقها معطل حتى يصبح محرك الحزم جاهزًا.",
+    "Search installed apps" to "ابحث عن التطبيقات المثبتة",
+    "Routing policies are saved but not active yet. The VPN service still does not create a TUN interface, so normal device traffic is not redirected." to "تم حفظ السياسات لكنها غير مفعّلة. خدمة VPN لا تنشئ واجهة TUN بعد، لذلك لا تتم إعادة توجيه حركة مرور الجهاز.",
+    "ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL" to "ABOEZZAT VPN • التحكم في الشبكة الخاصة",
+    "Close" to "إغلاق",
+    "Add proxy profile" to "إضافة ملف بروكسي",
+    "Edit proxy profile" to "تعديل ملف البروكسي",
+    "Profile name" to "اسم الملف",
+    "Server IP / hostname" to "عنوان IP للخادم / اسم المضيف",
+    "Port" to "المنفذ",
+    "PROXY TYPE" to "نوع البروكسي",
+    "AUTHENTICATION (OPTIONAL)" to "المصادقة (اختيارية)",
+    "Username" to "اسم المستخدم",
+    "Password" to "كلمة المرور",
+    "Remote DNS" to "DNS عن بُعد",
+    "Use proxy-side DNS when supported" to "استخدم DNS عبر البروكسي عند دعمه",
+    "Credentials are encrypted with Android Keystore before being saved." to "تُشفّر بيانات الاعتماد باستخدام Android Keystore قبل حفظها.",
+    "Save" to "حفظ",
+    "Cancel" to "إلغاء",
+    "VPN only" to "VPN فقط",
+    "Original proxy" to "البروكسي الأصلي",
+    "Proxy → VPN" to "البروكسي ثم VPN",
+    "Direct bypass" to "اتصال مباشر",
+    "Route through the VPN tunnel" to "التوجيه عبر نفق VPN",
+    "Use the first phone's proxy" to "استخدم بروكسي الهاتف الأول",
+    "Send through proxy, then VPN" to "مرّر الاتصال عبر البروكسي ثم VPN",
+    "Use the normal network directly" to "استخدم الشبكة العادية مباشرة"
+)
+
+@Composable
 private fun InfoCard(title: String, subtitle: String) {
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Panel)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            Text(subtitle, color = Muted, fontSize = 11.sp)
+            Text(tx(title), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text(tx(subtitle), color = Muted, fontSize = 11.sp)
         }
     }
 }
@@ -496,10 +557,10 @@ private fun ProfileEditorDialog(
                 modifier = Modifier.fillMaxWidth().height(490.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(9.dp)
             ) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Profile name") }, singleLine = true)
-                OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text("Server IP / hostname") }, singleLine = true)
-                OutlinedTextField(value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) }, label = { Text("Port") }, singleLine = true)
-                Text("PROXY TYPE", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(tx("Profile name")) }, singleLine = true)
+                OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text(tx("Server IP / hostname")) }, singleLine = true)
+                OutlinedTextField(value = port, onValueChange = { port = it.filter(Char::isDigit).take(5) }, label = { Text(tx("Port")) }, singleLine = true)
+                Text(tx("PROXY TYPE"), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = protocol == ProxyProtocol.HTTP_CONNECT, onClick = { protocol = ProxyProtocol.HTTP_CONNECT })
                     Text("HTTP CONNECT", color = Color.White, fontSize = 12.sp)
@@ -509,18 +570,18 @@ private fun ProfileEditorDialog(
                     Text("SOCKS5", color = Color.White, fontSize = 12.sp)
                 }
                 Divider(color = Color(0xFF33415B))
-                Text("AUTHENTICATION (OPTIONAL)", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("Username") }, singleLine = true)
-                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                Text(tx("AUTHENTICATION (OPTIONAL)"), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text(tx("Username")) }, singleLine = true)
+                OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text(tx("Password")) }, singleLine = true, visualTransformation = PasswordVisualTransformation())
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Remote DNS", color = Color.White, fontSize = 13.sp)
-                        Text("Use proxy-side DNS when supported", color = Muted, fontSize = 10.sp)
+                        Text(tx("Remote DNS"), color = Color.White, fontSize = 13.sp)
+                        Text(tx("Use proxy-side DNS when supported"), color = Muted, fontSize = 10.sp)
                     }
                     Switch(checked = remoteDns, onCheckedChange = { remoteDns = it })
                 }
                 if (error.isNotBlank()) Text(error, color = Color(0xFFFF8B8B), fontSize = 12.sp)
-                Text("Credentials are encrypted with Android Keystore before being saved.", color = Muted, fontSize = 10.sp)
+                Text(tx("Credentials are encrypted with Android Keystore before being saved."), color = Muted, fontSize = 10.sp)
             }
         },
         confirmButton = {
@@ -536,9 +597,9 @@ private fun ProfileEditorDialog(
                         remoteDns = remoteDns
                     )
                 )
-            }) { Text("Save", color = Accent) }
+            }) { Text(tx("Save"), color = Accent) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Muted) } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(tx("Cancel"), color = Muted) } }
     )
 }
 
@@ -560,6 +621,7 @@ private fun loadLaunchableApps(context: android.content.Context): List<Launchabl
         .sortedBy { it.label.lowercase() }
 }
 
+@Composable
 private fun RouteMode.displayName(): String = when (this) {
     RouteMode.VPN_ONLY -> "VPN only"
     RouteMode.PROXY_ONLY -> "Original proxy"
@@ -567,6 +629,7 @@ private fun RouteMode.displayName(): String = when (this) {
     RouteMode.DIRECT -> "Direct bypass"
 }
 
+@Composable
 private fun RouteMode.description(): String = when (this) {
     RouteMode.VPN_ONLY -> "Route through the VPN tunnel"
     RouteMode.PROXY_ONLY -> "Use the first phone's proxy"
