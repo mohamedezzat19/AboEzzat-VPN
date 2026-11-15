@@ -268,6 +268,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn pending_stop_request_is_consumed_once() {
+        TUN_STOP_REQUESTED.store(true, Ordering::SeqCst);
+        assert!(take_pending_stop_request());
+        assert!(!take_pending_stop_request());
+    }
+
+    #[test]
     fn run_token_guard_clears_global_state_after_stop() {
         let token = tokio_util::sync::CancellationToken::new();
         {
