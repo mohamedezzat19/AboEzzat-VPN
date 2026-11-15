@@ -93,6 +93,21 @@ class AboEzzatVpnService : VpnService() {
      */
     fun protectUpstreamSocket(socket: Socket): Boolean = protect(socket)
 
+    /**
+     * Stable synchronous entry point for the future app-owned JNI callback.
+     * Native code must call this before connect/bind/send and treat false as
+     * a hard failure. This method does not create or start a VPN tunnel.
+     */
+    @androidx.annotation.Keep
+    fun protectNativeSocket(fd: Int): Boolean {
+        if (fd < 0) return false
+        return try {
+            protect(fd)
+        } catch (_: RuntimeException) {
+            false
+        }
+    }
+
     companion object {
         const val ACTION_TEST_UPSTREAM_PROXY = "com.aboezzat.vpn.action.TEST_UPSTREAM_PROXY"
         const val EXTRA_RESULT_RECEIVER = "result_receiver"
