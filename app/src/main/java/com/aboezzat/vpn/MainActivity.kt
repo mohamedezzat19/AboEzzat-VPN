@@ -749,6 +749,22 @@ private fun tx(english: String): String {
 }
 
 private val arabicUi = mapOf(
+    "APPLICATION ROUTING" to "توجيه التطبيقات",
+    "Installed apps" to "التطبيقات المثبتة",
+    "Apps & routing" to "التطبيقات والتوجيه",
+    "installed apps" to "تطبيق مثبت",
+    "Manage app routes" to "إدارة مسارات التطبيقات",
+    "Proxy only" to "بروكسي فقط",
+    "Uses the first phone's upstream proxy" to "يستخدم بروكسي الهاتف الأول",
+    "Proxy + VPN" to "بروكسي + VPN",
+    "Proxy first, then the optional VPN route" to "البروكسي أولاً ثم مسار VPN الإضافي",
+    "Direct · no Proxy / VPN" to "اتصال مباشر · بدون بروكسي أو VPN",
+    "Uses the normal device network" to "يستخدم اتصال الجهاز العادي",
+    "VPN only" to "VPN فقط",
+    "Uses the VPN route without the upstream proxy" to "يستخدم مسار VPN دون البروكسي الأساسي",
+    "No apps in this group" to "لا توجد تطبيقات في هذه المجموعة",
+    "Routing engine status" to "حالة محرك التوجيه",
+    "These choices are saved on this phone, but per-app traffic enforcement is not active yet. The current tunnel still routes the whole device through the selected upstream proxy." to "يتم حفظ هذه الاختيارات على الهاتف، لكن توجيه حركة كل تطبيق على حدة غير مفعّل بعد. النفق الحالي يمرر حركة الجهاز بالكامل عبر البروكسي المحدد.",
     "CONNECTION STATUS" to "حالة الاتصال",
     "Not connected" to "غير متصل",
     "Tunnel active" to "النفق نشط",
