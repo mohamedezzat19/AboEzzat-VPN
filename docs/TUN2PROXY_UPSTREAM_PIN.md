@@ -15,9 +15,9 @@ The MIT license text must be retained with any vendored or modified source.
 
 ## Integration status in AboEzzat VPN
 
-This revision is audited but **not yet vendored, patched, linked, or shipped** in the Android app. Do not add a Cargo dependency on the upstream tag and assume Android sockets are protected.
+This revision is now vendored under `native/tun2proxy/`, with the upstream MIT license retained. The AboEzzat Android socket-protection patch is in `native/tun2proxy/src/lib.rs`; see `native/tun2proxy/UPSTREAM.md` for the exact provenance and verification boundary.
 
-The upstream Android path inspected for this revision has no app-owned `VpnService.protect(fd)` callback in the TCP/UDP socket creation paths. The Android path must be patched before use.
+The Rust socket factories now create TCP sockets unconnected and UDP sockets unbound, invoke the app-owned `abz_protect_socket_fd(fd)` callback, and fail closed before connect/bind when protection fails. The Rust engine is **not yet linked into the Android APK or started by the service**.
 
 ## Required patch points
 
@@ -42,16 +42,17 @@ run/stop lifetime ordering.
 
 ## Android build prerequisites for the native phase
 
-The current GitHub Actions workflow now builds the Android/Kotlin app and the
+The GitHub Actions workflow now installs Rust 1.90 and runs formatting plus
+host-side Rust library tests, then builds the Android/Kotlin app and the
 app-owned C++ JNI callback library with a pinned Android NDK and CMake. It does
-not yet build Rust. The engine phase still needs a pinned Rust toolchain (at
-least 1.90), Android Rust targets for each shipped ABI, and a reproducible
-Cargo build. The patched engine must then be linked with the JNI library and
-verified inside the APK.
+not yet cross-compile Rust for Android. The next phase needs Android Rust
+targets for each shipped ABI, a reproducible Cargo build, static/dynamic symbol
+resolution with the JNI bridge, and APK packaging verification.
 
 ## Feature gate
 
 Do not call `VpnService.Builder.establish()` for production until the patched
-native engine, JNI callback, stop/run synchronization, socket-ordering tests,
-and Android device tests all pass. The current app remains a proxy-preflight
+native engine is cross-compiled and linked, JNI callback lifetime is tied to
+native run/stop, socket-ordering tests pass on Android, and device tests confirm
+that traffic does not loop or leak around the VPN. The current app remains a proxy-preflight
 and configuration foundation, not a functioning device-wide VPN.
