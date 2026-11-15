@@ -28,12 +28,13 @@ internal object Tun2ProxyCommandBuilder {
         }
         val proxyUrl = "$scheme://$auth$host:${profile.port}"
 
+        val dnsMode = if (profile.remoteDns) "virtual" else "over-tcp"
         val arguments = listOf(
             "tun2proxy-bin",
             "--tun-fd", tunFd.toString(),
             "--close-fd-on-drop", "false",
             "--proxy", proxyUrl,
-            "--dns", "virtual",
+            "--dns", dnsMode,
             "--ipv6-enabled",
             "--mtu", mtu.toString(),
             "--verbosity", "info"
