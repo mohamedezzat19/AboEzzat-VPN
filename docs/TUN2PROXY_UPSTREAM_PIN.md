@@ -41,12 +41,9 @@ reference teardown. The JNI layer now calls the `tun2proxy_run_with_cli_args` an
 
 ## Android build prerequisites for the native phase
 
-The GitHub Actions workflow now installs Rust 1.90 and runs formatting plus
-host-side Rust library tests, then builds the Android/Kotlin app and the
-app-owned C++ JNI callback library with a pinned Android NDK and CMake. It does
-not yet cross-compile Rust for Android. The next phase needs Android Rust
-targets for each shipped ABI, a reproducible Cargo build, static/dynamic symbol
-resolution with the JNI bridge, and APK packaging verification.
+The GitHub Actions workflow installs Rust 1.90, runs host-side Rust library tests and Android target checks, builds release static libraries for all three shipped Android ABIs, links each static library into the JNI shared library, and assembles the debug APK. Run `43716191472` completed successfully and uploaded `AboEzzat-VPN-debug`. This confirms the CI build/link/package path, not execution on a physical Android device.
+
+The Kotlin `Tun2ProxyCommandBuilder` now creates the native CLI for HTTP CONNECT and SOCKS5 profiles, percent-encodes credentials, brackets IPv6 proxy hosts, enables virtual DNS, and passes the TUN descriptor with `--close-fd-on-drop false` so the service retains descriptor ownership. Unit tests cover these cases.
 
 ## Feature gate
 
