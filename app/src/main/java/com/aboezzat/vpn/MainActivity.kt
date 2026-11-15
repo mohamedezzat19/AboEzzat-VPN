@@ -60,6 +60,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -81,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val layoutDirection = if (resources.configuration.locales[0].language == "ar") LayoutDirection.Rtl else LayoutDirection.Ltr
+            CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
             MaterialTheme(colorScheme = darkColorScheme(
                 primary = Accent,
                 background = Midnight,
@@ -89,6 +94,7 @@ class MainActivity : AppCompatActivity() {
                 onSurface = Color.White
             )) {
                 Dashboard(ProxyProfileStore(applicationContext))
+            }
             }
         }
     }
@@ -178,14 +184,14 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 val prepareIntent = VpnService.prepare(context)
                                 if (prepareIntent == null) {
                                     vpnPermissionGranted = true
-                                    notice = "Android VPN permission already granted. Tunnel is still OFF."
+                                    notice = tx("Android VPN permission already granted. Tunnel is still OFF.")
                                 } else {
                                     vpnPermissionLauncher.launch(prepareIntent)
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
                         ) {
-                            Text(if (vpnPermissionGranted) "Check" else "Authorize")
+                            Text(tx(if (vpnPermissionGranted) "Check" else "Authorize"))
                         }
                     }
                     Text(tx("This only checks Android consent. It does NOT connect, create a TUN interface, or redirect traffic."),
@@ -247,7 +253,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 onClick = {
                                     activeName = profile.name
                                     store.setActiveProfile(profile.name)
-                                    notice = "Active profile: ${profile.name}"
+                                    notice = tx("Active profile: ${profile.name}")
                                 }
                             )
                             Column(Modifier.weight(1f)) {
@@ -269,11 +275,11 @@ private fun Dashboard(store: ProxyProfileStore) {
                                         activeName = profiles.firstOrNull()?.name.orEmpty()
                                         store.setActiveProfile(activeName)
                                     }
-                                    notice = "Profile deleted"
+                                    notice = tx("Profile deleted")
                                 } else {
                                     profiles.clear()
                                     profiles.addAll(previousProfiles)
-                                    notice = "Profile was not deleted. Secure profile storage could not save changes."
+                                    notice = tx("Profile was not deleted. Secure profile storage could not save changes.")
                                 }
                             }) {
                                 Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete profile", tint = Color(0xFFFF8B8B))
@@ -327,7 +333,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                             enabled = testing[profile.name] != true,
                             colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
                         ) {
-                            Text(if (testing[profile.name] == true) "Testing protected socket…" else "Test via VPN service")
+                            Text(tx(if (testing[profile.name] == true) "Testing protected socket…" else "Test via VPN service"))
                         }
                         Text(tx("This runs the proxy handshake inside the VPN service and calls protect() before connect. No TUN tunnel or device traffic routing is active yet."),
                             color = Muted,
@@ -363,7 +369,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                 label = { Text(tx("Search installed apps")) },
                 singleLine = true
             )
-            Text("${installedApps.size} launchable apps found", color = Muted, fontSize = 10.sp)
+            Text("${installedApps.size} ${tx("installed apps found")}", color = Muted, fontSize = 10.sp)
             installedApps.filter { it.label.contains(routeSearch, ignoreCase = true) || it.packageName.contains(routeSearch, ignoreCase = true) }
                 .forEach { app ->
                     Card(
@@ -401,7 +407,7 @@ private fun Dashboard(store: ProxyProfileStore) {
         AlertDialog(
             onDismissRequest = { selectedRouteApp = null },
             containerColor = Panel,
-            title = { Text("Route for ${app.label}", color = Color.White) },
+            title = { Text(tx("Route for ${app.label}"), color = Color.White) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     RouteMode.values().forEach { mode ->
@@ -436,7 +442,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                 if (validation != null) {
                     editorError = validation
                 } else if (profiles.any { it.name.equals(profile.name, true) && it.name != editorProfile?.name }) {
-                    editorError = "A profile with this name already exists"
+                    editorError = tx("A profile with this name already exists")
                 } else {
                     val previousProfiles = profiles.toList()
                     if (editorProfile == null) profiles.add(profile)
@@ -447,7 +453,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     if (!store.saveProfiles(profiles.toList())) {
                         profiles.clear()
                         profiles.addAll(previousProfiles)
-                        editorError = "Secure profile storage could not save changes. Existing profiles were preserved."
+                        editorError = tx("Secure profile storage could not save changes. Existing profiles were preserved.")
                         return@ProfileEditorDialog
                     }
                     if (activeName.isBlank()) {
@@ -458,7 +464,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         store.setActiveProfile(profile.name)
                     }
                     showEditor = false
-                    notice = "Profile saved on this device"
+                    notice = tx("Profile saved on this device")
                 }
             }
         )
@@ -520,7 +526,19 @@ private val arabicUi = mapOf(
     "Route through the VPN tunnel" to "التوجيه عبر نفق VPN",
     "Use the first phone's proxy" to "استخدم بروكسي الهاتف الأول",
     "Send through proxy, then VPN" to "مرّر الاتصال عبر البروكسي ثم VPN",
-    "Use the normal network directly" to "استخدم الشبكة العادية مباشرة"
+    "Use the normal network directly" to "استخدم الشبكة العادية مباشرة",
+    "Android VPN permission already granted. Tunnel is still OFF." to "تم منح إذن VPN من Android. النفق لا يزال متوقفًا.",
+    "VPN permission was not granted." to "لم يتم منح إذن VPN.",
+    "Active profile: ${profile.name}" to "ملف البروكسي النشط: ${profile.name}",
+    "Profile deleted" to "تم حذف ملف البروكسي",
+    "Profile was not deleted. Secure profile storage could not save changes." to "لم يتم حذف الملف. تعذر حفظ التغييرات في التخزين الآمن.",
+    "Profile saved on this device" to "تم حفظ ملف البروكسي على هذا الجهاز",
+    "A profile with this name already exists" to "يوجد ملف بهذا الاسم بالفعل",
+    "Secure profile storage could not save changes. Existing profiles were preserved." to "تعذر حفظ التغييرات في التخزين الآمن. تم الحفاظ على الملفات الحالية.",
+    "installed apps found" to "تطبيقات قابلة للتشغيل",
+    "Route for ${app.label}" to "مسار التطبيق: ${app.label}",
+    "Check" to "تحقق",
+    "Authorize" to "منح الإذن"
 )
 
 @Composable
@@ -551,7 +569,7 @@ private fun ProfileEditorDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Panel,
-        title = { Text(if (initial == null) "Add proxy profile" else "Edit proxy profile", color = Color.White) },
+        title = { Text(tx(if (initial == null) "Add proxy profile" else "Edit proxy profile"), color = Color.White) },
         text = {
             Column(
                 modifier = Modifier.fillMaxWidth().height(490.dp).verticalScroll(rememberScrollState()),
@@ -622,7 +640,6 @@ private fun loadLaunchableApps(context: android.content.Context): List<Launchabl
 }
 
 @Composable
-@Composable
 private fun RouteMode.displayName(): String = when (this) {
     RouteMode.VPN_ONLY -> tx("VPN only")
     RouteMode.PROXY_ONLY -> tx("Original proxy")
@@ -630,7 +647,6 @@ private fun RouteMode.displayName(): String = when (this) {
     RouteMode.DIRECT -> tx("Direct bypass")
 }
 
-@Composable
 @Composable
 private fun RouteMode.description(): String = when (this) {
     RouteMode.VPN_ONLY -> tx("Route through the VPN tunnel")
