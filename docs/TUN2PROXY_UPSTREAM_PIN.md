@@ -17,7 +17,7 @@ The MIT license text must be retained with any vendored or modified source.
 
 This revision is now vendored under `native/tun2proxy/`, with the upstream MIT license retained. The AboEzzat Android socket-protection patch is in `native/tun2proxy/src/lib.rs`; see `native/tun2proxy/UPSTREAM.md` for the exact provenance and verification boundary.
 
-The Rust socket factories now create TCP sockets unconnected and UDP sockets unbound, invoke the app-owned `abz_protect_socket_fd(fd)` callback, and fail closed before connect/bind when protection fails. The Rust engine is **not yet linked into the Android APK or started by the service**.
+The Rust socket factories now create TCP sockets unconnected and UDP sockets unbound, invoke the app-owned `abz_protect_socket_fd(fd)` callback, and fail closed before connect/bind when protection fails. The Rust engine is now cross-compiled for `arm64-v8a`, `armeabi-v7a`, and `x86_64`, linked into the `abz_protector` JNI shared library, and included in a successful debug APK build. The JNI run/stop entry points are exposed. The service still does **not** establish or run a production TUN session; device-side start/stop and traffic verification remain pending.
 
 ## Required patch points
 
@@ -37,8 +37,7 @@ The Java/Kotlin callback endpoint and a first app-owned JNI bridge are now prese
 `AboEzzatVpnService.protectNativeSocket(fd)`. It delegates to the tested,
 fail-closed `NativeSocketProtection` boundary. The JNI callback handles native
 thread attachment, synchronous Java calls, Java exceptions, and in-flight
-reference teardown. The engine still has to register/use the C ABI and enforce
-run/stop lifetime ordering.
+reference teardown. The JNI layer now calls the `tun2proxy_run_with_cli_args` and `tun2proxy_stop` C ABI functions. The service must still enforce run/stop lifetime ordering and keep the TUN descriptor alive until the native run function has returned.
 
 ## Android build prerequisites for the native phase
 
