@@ -55,6 +55,7 @@ class ProxyTcpTunnelTest {
                 }
             )
             tunnel.use { socket ->
+                assertEquals("A live tunnel must not retain the handshake read timeout", 0, socket.soTimeout)
                 socket.getOutputStream().write("ping".toByteArray(Charsets.US_ASCII))
                 val response = ByteArray(4)
                 socket.getInputStream().readFully(response)
