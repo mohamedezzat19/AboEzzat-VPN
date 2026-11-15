@@ -39,7 +39,7 @@ class AboEzzatVpnService : VpnService() {
     @Volatile private var nativeBridgeBound = false
     @Volatile private var destroyed = false
     @Volatile private var stopRequested = false
-    @Volatile private var activeStartId = 0
+    @Volatile private var latestStartId = 0
     @Volatile private var activeReceiver: ResultReceiver? = null
 
     private lateinit var tunnelRunner: NativeTunnelRunner
@@ -61,6 +61,7 @@ class AboEzzatVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
         return when (intent?.action) {
             ACTION_TEST_UPSTREAM_PROXY -> {
                 runProxyTest(intent, startId)
@@ -173,7 +174,6 @@ class AboEzzatVpnService : VpnService() {
         }
 
         activeReceiver = receiver
-        activeStartId = startId
         stopRequested = false
         val accepted = tunnelRunner.start(
             cliArgs = command,
@@ -247,7 +247,7 @@ class AboEzzatVpnService : VpnService() {
                     }
                 )
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelfResult(activeStartId)
+                stopSelfResult(latestStartId)
             }
         }
     }
