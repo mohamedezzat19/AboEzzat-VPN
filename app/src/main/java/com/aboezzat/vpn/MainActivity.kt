@@ -94,6 +94,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun Dashboard(store: ProxyProfileStore) {
     val profiles = remember { mutableStateListOf<ProxyProfile>().apply { addAll(store.loadProfiles()) } }
+    val credentialWarning = remember(store) { store.hasCredentialReadFailure() }
     val context = LocalContext.current
     var notice by remember { mutableStateOf("") }
     var vpnPermissionGranted by remember { mutableStateOf(VpnService.prepare(context) == null) }
@@ -187,6 +188,13 @@ private fun Dashboard(store: ProxyProfileStore) {
                 }
             }
 
+            if (credentialWarning) {
+                InfoCard(
+                    "Saved credentials need attention",
+                    "Android could not read or decrypt saved proxy profile data. Existing data is protected from being overwritten. Restore the original app data and Android Keystore state before editing or saving profiles."
+                )
+            }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("PROXY PROFILES", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -248,13 +256,19 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 Icon(Icons.Rounded.Edit, contentDescription = "Edit profile", tint = Accent)
                             }
                             IconButton(onClick = {
+                                val previousProfiles = profiles.toList()
                                 profiles.remove(profile)
-                                store.saveProfiles(profiles.toList())
-                                if (activeName == profile.name) {
-                                    activeName = profiles.firstOrNull()?.name.orEmpty()
-                                    store.setActiveProfile(activeName)
+                                if (store.saveProfiles(profiles.toList())) {
+                                    if (activeName == profile.name) {
+                                        activeName = profiles.firstOrNull()?.name.orEmpty()
+                                        store.setActiveProfile(activeName)
+                                    }
+                                    notice = "Profile deleted"
+                                } else {
+                                    profiles.clear()
+                                    profiles.addAll(previousProfiles)
+                                    notice = "Profile was not deleted. Secure profile storage could not save changes."
                                 }
-                                notice = "Profile deleted"
                             }) {
                                 Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete profile", tint = Color(0xFFFF8B8B))
                             }
@@ -421,12 +435,18 @@ private fun Dashboard(store: ProxyProfileStore) {
                 } else if (profiles.any { it.name.equals(profile.name, true) && it.name != editorProfile?.name }) {
                     editorError = "A profile with this name already exists"
                 } else {
+                    val previousProfiles = profiles.toList()
                     if (editorProfile == null) profiles.add(profile)
                     else {
                         val index = profiles.indexOfFirst { it.name == editorProfile?.name }
                         if (index >= 0) profiles[index] = profile
                     }
-                    store.saveProfiles(profiles.toList())
+                    if (!store.saveProfiles(profiles.toList())) {
+                        profiles.clear()
+                        profiles.addAll(previousProfiles)
+                        editorError = "Secure profile storage could not save changes. Existing profiles were preserved."
+                        return@ProfileEditorDialog
+                    }
                     if (activeName.isBlank()) {
                         activeName = profile.name
                         store.setActiveProfile(profile.name)
