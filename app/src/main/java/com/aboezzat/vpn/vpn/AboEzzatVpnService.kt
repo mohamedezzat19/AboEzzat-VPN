@@ -5,8 +5,7 @@ import android.net.VpnService
 import android.os.Bundle
 import android.os.ResultReceiver
 import com.aboezzat.vpn.proxy.ProxyConnectionTester
-import com.aboezzat.vpn.proxy.ProxyProfile
-import com.aboezzat.vpn.proxy.ProxyProtocol
+import com.aboezzat.vpn.proxy.ProxyTestRequestParser
 import java.net.Socket
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -32,19 +31,15 @@ class AboEzzatVpnService : VpnService() {
         }
 
         val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
-        val profile = runCatching {
-            ProxyProfile(
-                name = intent.getStringExtra(EXTRA_NAME).orEmpty(),
-                host = intent.getStringExtra(EXTRA_HOST).orEmpty(),
-                port = intent.getIntExtra(EXTRA_PORT, 0),
-                protocol = ProxyProtocol.valueOf(
-                    intent.getStringExtra(EXTRA_PROTOCOL) ?: ProxyProtocol.HTTP_CONNECT.name
-                ),
-                username = intent.getStringExtra(EXTRA_USERNAME),
-                password = intent.getStringExtra(EXTRA_PASSWORD),
-                remoteDns = intent.getBooleanExtra(EXTRA_REMOTE_DNS, true)
-            )
-        }.getOrNull()
+        val profile = ProxyTestRequestParser.parse(
+            name = intent.getStringExtra(EXTRA_NAME),
+            host = intent.getStringExtra(EXTRA_HOST),
+            port = intent.getIntExtra(EXTRA_PORT, 0),
+            protocol = intent.getStringExtra(EXTRA_PROTOCOL),
+            username = intent.getStringExtra(EXTRA_USERNAME),
+            password = intent.getStringExtra(EXTRA_PASSWORD),
+            remoteDns = intent.getBooleanExtra(EXTRA_REMOTE_DNS, true)
+        )
 
         testExecutor.execute {
             try {
