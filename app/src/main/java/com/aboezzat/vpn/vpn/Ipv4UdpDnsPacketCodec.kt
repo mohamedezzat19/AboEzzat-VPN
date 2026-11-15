@@ -39,6 +39,9 @@ object Ipv4UdpDnsPacketCodec {
         require(u8(packet, 9) == UDP_PROTOCOL) { "IPv4 packet is not UDP." }
 
         val fragmentField = u16(packet, 6)
+        require((fragmentField and RESERVED_FLAG) == 0) {
+            "IPv4 reserved fragment flag must be zero."
+        }
         require((fragmentField and FRAGMENT_MASK) == 0) {
             "Fragmented IPv4 UDP packets are not supported."
         }
@@ -195,6 +198,7 @@ object Ipv4UdpDnsPacketCodec {
     private const val UDP_HEADER_BYTES = 8
     private const val MIN_PACKET_BYTES = IPV4_MIN_HEADER_BYTES + UDP_HEADER_BYTES + DnsTcpForwarder.DNS_HEADER_BYTES
     private const val UDP_PROTOCOL = 17
+    private const val RESERVED_FLAG = 0x8000
     private const val DONT_FRAGMENT_FLAG = 0x4000
     private const val FRAGMENT_MASK = 0x3fff
     private const val MAX_IPV4_PACKET_BYTES = 65_535
