@@ -16,7 +16,7 @@
         android:label="AboEzzat VPN"
         android:supportsRtl="true"
         android:localeConfig="@xml/locales_config"
-        android:theme="@android:style/Theme.Material.NoActionBar">
+        android:theme="@style/AppTheme">
         <activity
             android:name=".MainActivity"
             android:exported="true">
