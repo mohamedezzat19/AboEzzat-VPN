@@ -1,5 +1,8 @@
 use crate::Args;
-use std::os::raw::{c_char, c_int, c_ushort};
+use std::{
+    os::raw::{c_char, c_int, c_ushort},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 /// # Safety
 /// Run the tun2proxy component with command line arguments
@@ -20,12 +23,23 @@ pub unsafe extern "C" fn tun2proxy_run_with_cli_args(cli_args: *const c_char, tu
     };
     let Ok(args) = <Args as ::clap::Parser>::try_parse_from(args) else {
         log::error!("Failed to parse CLI arguments");
+        take_pending_stop_request();
         return -7;
     };
     general_run_for_api(args, tun_mtu, packet_information)
 }
 
 static TUN_QUIT: std::sync::Mutex<Option<tokio_util::sync::CancellationToken>> = std::sync::Mutex::new(None);
+static TUN_STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+fn take_pending_stop_request() -> bool {
+    TUN_STOP_REQUESTED.swap(false, Ordering::SeqCst)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn tun2proxy_clear_stop_request() {
+    TUN_STOP_REQUESTED.store(false, Ordering::SeqCst);
+}
 
 struct RunTokenGuard;
 
@@ -41,13 +55,18 @@ impl Drop for RunTokenGuard {
 }
 
 pub(crate) fn tun2proxy_stop_internal() -> c_int {
-    if let Ok(lock) = TUN_QUIT.lock()
-        && let Some(shutdown_token) = lock.as_ref()
-    {
-        shutdown_token.cancel();
+    if let Ok(lock) = TUN_QUIT.lock() {
+        if let Some(shutdown_token) = lock.as_ref() {
+            shutdown_token.cancel();
+            return 0;
+        }
+        // Stop may arrive just before the native run function publishes its
+        // cancellation token. Carry it into that imminent start instead of
+        // silently losing the stop request.
+        TUN_STOP_REQUESTED.store(true, Ordering::SeqCst);
         return 0;
     }
-    -1
+    -2
 }
 
 pub fn general_run_for_api(args: Args, tun_mtu: u16, packet_information: bool) -> c_int {
@@ -63,6 +82,9 @@ pub fn general_run_for_api(args: Args, tun_mtu: u16, packet_information: bool) -
             return -1;
         }
         *lock = Some(shutdown_token.clone());
+        if take_pending_stop_request() {
+            shutdown_token.cancel();
+        }
     } else {
         log::error!("failed to lock tun2proxy quit token");
         return -2;
