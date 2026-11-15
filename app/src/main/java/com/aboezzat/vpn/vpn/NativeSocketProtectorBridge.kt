@@ -26,4 +26,21 @@ internal object NativeSocketProtectorBridge {
     @JvmStatic
     @Keep
     external fun nativeProtectSocket(fd: Int): Boolean
+
+    /**
+     * Blocking native run entry point. Call only from a dedicated worker
+     * thread; never from the Android main thread.
+     */
+    @JvmStatic
+    @Keep
+    external fun nativeRunEngine(
+        cliArgs: String,
+        tunMtu: Int,
+        packetInformation: Boolean
+    ): Int
+
+    /** Requests cancellation; caller must still wait for nativeRunEngine to return. */
+    @JvmStatic
+    @Keep
+    external fun nativeStopEngine(): Int
 }
