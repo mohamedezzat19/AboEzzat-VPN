@@ -1,52 +1,65 @@
 # AboEzzat VPN
 
-A professional Android traffic-routing client designed to combine an upstream HTTP/HTTPS or SOCKS5 proxy with a single Android VPN service and per-app routing.
+A professional Android app foundation for combining an upstream proxy from a first phone with a future per-app VPN routing engine.
 
-> **Development status:** foundation scaffold. The current app is a UI/build baseline only. It does not yet establish a working proxy tunnel or VPN data plane. Do not use it as a privacy or security product until the tunnel, DNS, IPv6, UDP, leak, and reconnect tests are implemented and passed.
+> **Current status — foundation and proxy preflight only.** The app can save proxy profiles, encrypt saved credentials with Android Keystore, save per-app route preferences, request Android's VPN permission, and run an HTTP CONNECT or SOCKS5 proxy handshake from its VPN service using a protected outbound socket. It does **not** create a TUN interface, forward device traffic, enforce per-app routing, or provide an active VPN tunnel yet. Do not treat the current build as a privacy or security VPN.
 
-## Product goals
+## Current capabilities
 
-- One Android `VpnService` owner; never start a second competing VPN service.
-- Upstream proxy profiles: HTTP/HTTPS CONNECT and SOCKS5, with optional credentials.
-- Per-app route policies: VPN, upstream proxy, proxy-then-VPN, or direct.
-- Banking / direct-bypass profiles, with a clear warning that apps may still detect VPN state or reject proxy/network characteristics.
-- Persistent upstream-proxy connection configuration to the first phone's Android Server Proxy.
-- Professional dashboard, diagnostics, and build automation.
+- Proxy profiles for HTTP CONNECT and SOCKS5.
+- Optional username/password authentication.
+- AES-GCM credential encryption backed by Android Keystore.
+- Proxy preflight test for TCP CONNECT handshake, with a connection timeout and latency result.
+- The preflight service calls `VpnService.protect(socket)` before opening its outbound proxy socket.
+- Saved per-app route preferences:
+  - VPN only
+  - Original upstream proxy only
+  - Proxy then VPN
+  - Direct bypass
+- VPN permission request flow.
+- GitHub Actions debug APK build and local unit tests.
 
-## Important Android networking constraint
+The proxy test confirms only that the proxy handshake succeeded. It does not verify the destination TLS handshake, UDP, DNS behavior for all traffic, or device-wide routing.
 
-Android exposes one active VPN interface per user/profile. The app-routing allowlist and denylist are mutually exclusive and are applied when establishing the VPN interface. Excluded apps use the device's normal system network; they do **not** automatically use the upstream proxy. Therefore, routing apps independently among direct, proxy-only, VPN-only, and proxy-then-VPN requires a real packet-processing engine and explicit socket/proxy routing. The UI policy model in this scaffold is not yet a working data plane.
+## Android networking constraints
 
-Official docs: https://developer.android.com/develop/connectivity/vpn
+Android exposes one active VPN interface per Android user/profile. VPN app allowlists and disallowlists are mutually exclusive and are applied when the VPN interface is established. Excluding an app from the VPN sends it through the normal system network; it does **not** automatically send it through the upstream proxy.
 
-## Architecture
+Therefore, independently enforcing direct, proxy-only, VPN-only, and proxy-then-VPN routes requires a real packet-processing engine, explicit per-app policy enforcement, and careful DNS/socket routing. The route choices currently shown in the app are saved preferences only.
 
-- `app/` — Android application and Compose UI.
-- `app/src/main/java/com/aboezzat/vpn/core/` — route and proxy domain models.
-- `app/src/main/java/com/aboezzat/vpn/proxy/` — proxy profile validation and protocol definitions.
-- `app/src/main/java/com/aboezzat/vpn/routing/` — per-app policy model.
-- `app/src/main/java/com/aboezzat/vpn/vpn/` — future VPN service/data-plane integration.
-- `.github/workflows/android.yml` — CI build and APK artifact.
+Official Android documentation: https://developer.android.com/develop/connectivity/vpn
+
+## Repository layout
+
+- `app/src/main/java/com/aboezzat/vpn/core/` — route policy model.
+- `app/src/main/java/com/aboezzat/vpn/proxy/` — proxy models, request validation, and HTTP CONNECT/SOCKS5 preflight.
+- `app/src/main/java/com/aboezzat/vpn/data/` — profile and route preference persistence.
+- `app/src/main/java/com/aboezzat/vpn/vpn/` — Android VPN service entry point; no TUN data plane is enabled yet.
+- `.github/workflows/android.yml` — CI unit tests and debug APK artifact.
 
 ## Build
 
-Open the repository in Android Studio or run:
+The repository currently builds in GitHub Actions with Gradle 8.9 and JDK 17:
 
 ```bash
-./gradlew :app:assembleDebug
+gradle :app:testDebugUnitTest :app:assembleDebug
 ```
 
-The GitHub Actions workflow builds a debug APK on pushes and pull requests.
+There is currently no Gradle wrapper in the repository. Android Studio can also be used to open and build the project with a compatible Android Gradle Plugin setup.
 
-## Next implementation milestones
+## Next engineering milestones
 
-1. Inspect the exact Android Server Proxy protocol, port, authentication, and supported UDP behavior.
-2. Implement and test HTTP CONNECT and SOCKS5 transport adapters.
-3. Implement the VPN TUN packet loop and protected upstream sockets.
-4. Implement routing policy enforcement and DNS/IPv6 handling.
-5. Add app picker, persistence, diagnostics, reconnect, and leak tests.
-6. Verify Banking Mode on real banking apps without promising that every app will accept it.
+1. Verify the exact Android Server Proxy protocol, port, authentication behavior, and whether it supports UDP.
+2. Implement transport adapters with explicit socket lifecycle, timeouts, cancellation, and protocol tests.
+3. Design and implement the TUN packet loop before calling `Builder.establish()`.
+4. Add TCP stream forwarding and protected upstream sockets without routing loops.
+5. Implement per-app route enforcement, DNS handling, IPv4/IPv6 behavior, and reconnect handling.
+6. Decide and implement UDP behavior according to upstream proxy capabilities.
+7. Add leak, disconnect, network-switch, and real-device tests before presenting the app as a working VPN.
 
-## Security
+## Security notes
 
-Never commit proxy passwords, VPN private keys, or server credentials. Store secrets using Android Keystore-backed encryption once profile persistence is implemented.
+- Never commit proxy passwords, WireGuard private keys, or server credentials.
+- Proxy credentials are encrypted with Android Keystore before persistence.
+- Banking/direct-bypass preferences cannot guarantee that a banking app will accept the device's network or VPN state.
+- Do not enable a TUN interface until the packet loop and failure-safe shutdown path are complete.
