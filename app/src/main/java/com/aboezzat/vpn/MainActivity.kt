@@ -329,19 +329,6 @@ private fun Dashboard(store: ProxyProfileStore) {
                     ) {
                         ConnectionCircle(
                             title = "Proxy",
-                            connected = if (proxyStatus == "Not tested") null else proxyConnected,
-                            connecting = proxyTesting,
-                            onClick = {
-                                val profile = profiles.firstOrNull { it.name == activeName }
-                                if (profile == null) {
-                                    notice = "Add and select a proxy profile first."
-                                } else {
-                                    testProxyProfile(profile)
-                                }
-                            }
-                        )
-                        ConnectionCircle(
-                            title = "VPN",
                             connected = tunnelActive,
                             connecting = tunnelConnecting,
                             onClick = {
@@ -352,10 +339,18 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 }
                             }
                         )
+                        ConnectionCircle(
+                            title = "VPN",
+                            connected = null,
+                            connecting = false,
+                            onClick = {
+                                notice = "Country VPN mode is separate and will be enabled after the Proxy tunnel is verified."
+                            }
+                        )
                     }
                     Text(
-                        tx(if (proxyTesting) "Testing proxy connection…" else proxyStatus),
-                        color = if (proxyTesting || proxyStatus == "Not tested") Muted else if (proxyConnected) Color(0xFF54D98C) else Color(0xFFFF7777),
+                        tx(if (tunnelConnecting) "Starting proxy tunnel…" else if (tunnelActive) "Proxy tunnel active" else "Proxy tunnel stopped"),
+                        color = if (tunnelConnecting) Muted else if (tunnelActive) Color(0xFF54D98C) else Color(0xFFFF7777),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
                     )
