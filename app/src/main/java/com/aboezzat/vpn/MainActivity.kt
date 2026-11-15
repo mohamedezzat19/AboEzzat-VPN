@@ -173,8 +173,8 @@ private fun Dashboard(store: ProxyProfileStore) {
                         Column(Modifier.weight(1f)) {
                             Text(tx("Android VPN permission"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(
-                                if (vpnPermissionGranted) "Permission granted · tunnel remains off"
-                                else "Permission required before a VPN can be started",
+                                tx(if (vpnPermissionGranted) "Permission granted · tunnel remains off"
+                                else "Permission required before a VPN can be started"),
                                 color = if (vpnPermissionGranted) Accent else Muted,
                                 fontSize = 10.sp
                             )
@@ -485,6 +485,23 @@ private fun tx(english: String): String {
 
 private val arabicUi = mapOf(
     "CONNECTION STATUS" to "حالة الاتصال",
+    "Android VPN permission granted. Tunnel is still OFF." to "تم منح إذن VPN من Android. النفق لا يزال متوقفًا.",
+    "VPN permission was not granted." to "لم يتم منح إذن VPN.",
+    "Android VPN permission already granted. Tunnel is still OFF." to "تم منح إذن VPN من Android بالفعل. النفق لا يزال متوقفًا.",
+    "Permission granted · tunnel remains off" to "تم منح الإذن · النفق لا يزال متوقفًا",
+    "Permission required before a VPN can be started" to "يلزم منح الإذن قبل تشغيل VPN",
+    "Proxy CONNECT handshake succeeded. Destination TLS was not tested." to "نجحت مصافحة اتصال البروكسي. لم يتم اختبار TLS مع الوجهة.",
+    "Connection timed out. Check server IP, port and network." to "انتهت مهلة الاتصال. تحقق من عنوان الخادم والمنفذ والشبكة.",
+    "Could not resolve the proxy server address." to "تعذر تحديد عنوان خادم البروكسي.",
+    "Could not protect the upstream socket from VPN routing." to "تعذرت حماية مقبس البروكسي من التوجيه عبر VPN.",
+    "Proxy authentication required or credentials rejected (HTTP 407)." to "يتطلب البروكسي المصادقة أو تم رفض بيانات الدخول (HTTP 407).",
+    "SOCKS5 server requires a username and password." to "يتطلب خادم SOCKS5 اسم مستخدم وكلمة مرور.",
+    "SOCKS5 authentication failed." to "فشلت مصادقة SOCKS5.",
+    "SOCKS5 server rejected all authentication methods." to "رفض خادم SOCKS5 جميع طرق المصادقة.",
+    "Server is not a SOCKS5 proxy." to "الخادم ليس بروكسي SOCKS5.",
+    "Invalid proxy profile." to "ملف البروكسي غير صالح.",
+    "Proxy handshake failed." to "فشلت مصافحة البروكسي.",
+    "Proxy test could not be completed." to "تعذر إكمال اختبار البروكسي.",
     "Edit profile" to "تعديل الملف",
     "Delete profile" to "حذف الملف",
     "Banking mode · manual policy" to "وضع التطبيقات البنكية · إعداد يدوي",
