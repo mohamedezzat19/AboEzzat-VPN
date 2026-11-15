@@ -23,14 +23,10 @@ through a fail-closed protection check:
 - Non-Android builds retain the upstream direct socket behavior so host tests
   can exercise the rest of the crate.
 
-The callback symbol is currently supplied by the app-owned JNI C++ bridge.
-The Rust shared/static library is not yet linked into the Android APK, and
-native engine start/stop is not yet connected to `AboEzzatVpnService`.
+The callback symbol is supplied by the app-owned JNI C++ bridge. The patched Rust static library is cross-compiled for `arm64-v8a`, `armeabi-v7a`, and `x86_64`, linked into the `abz_protector` shared library, and packaged in the Android APK. JNI exposes native run/stop and start-arm/cancel methods. The Android service now establishes a user-initiated TUN interface, runs the engine on a dedicated worker, and keeps the ParcelFileDescriptor open until the native run call returns.
+
+The Rust API shutdown watchdog was also changed so an embedded library cleanup delay logs an error rather than calling `std::process::exit` and terminating the host Android process. Stop requests arriving before the Rust cancellation token is published are carried into startup and consumed safely.
 
 ## Current verification boundary
 
-CI runs Rust formatting and host library tests, plus the Android/Kotlin build.
-This does not yet prove Android cross-compilation, symbol resolution between
-the Rust and C++ libraries, TUN lifecycle, packet routing, or live VPN behavior.
-Do not call `VpnService.Builder.establish()` until those integration steps
-and device tests pass.
+CI verifies host Rust tests, Android target compilation, static linking, Kotlin unit tests, and APK packaging. These checks do not prove live packet forwarding on a physical device. The current service routes the whole device through the selected upstream proxy; saved per-app route policies are not yet enforced. TCP is proxied; general UDP depends on SOCKS5 UDP ASSOCIATE and is not supported by ordinary HTTP CONNECT. Device tests for DNS, authentication, no-loop socket protection, stop/revoke cleanup, reconnect, and background lifecycle are still required before calling this production-ready.
