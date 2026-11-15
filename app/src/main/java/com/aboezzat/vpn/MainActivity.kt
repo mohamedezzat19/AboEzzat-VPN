@@ -907,20 +907,25 @@ private fun ConnectionCircle(
     onClick: () -> Unit
 ) {
     val stateColor = when {
-        connecting -> Color(0xFF4D91E8)
+        connecting -> Color(0xFF2867A8)
         connected == true -> Color(0xFF168B55)
-        connected == false -> Color(0xFFB93643)
-        else -> Color.Transparent
+        connected == false -> Color(0xFF303846)
+        else -> Color(0xFF303846)
+    }
+    val statusText = when {
+        connecting -> "Connecting…"
+        connected == true -> "Connected"
+        else -> "Disconnected"
     }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(7.dp)
     ) {
         Surface(
-            modifier = Modifier.size(86.dp).clickable(enabled = !connecting, onClick = onClick),
+            modifier = Modifier.size(100.dp).clickable(enabled = !connecting, onClick = onClick),
             shape = CircleShape,
             color = stateColor,
-            border = if (connected == null && !connecting) BorderStroke(2.dp, Color(0xFF718096)) else null
+            border = if (connected != true && !connecting) BorderStroke(1.dp, Color(0xFF718096)) else null
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (connecting) {
@@ -930,28 +935,18 @@ private fun ConnectionCircle(
                         strokeWidth = 3.dp
                     )
                 } else {
-                    if (connected != null) {
-                        Text(
-                            if (connected) "✓" else "×",
-                            color = Color.White,
-                            fontSize = 34.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
+                    Text(
+                        tx(statusText),
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1
+                    )
                 }
             }
         }
         Text(tx(title), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text(
-            tx(if (connecting) "Connecting…" else if (connected == true) "Connected" else if (connected == false) "Disconnected" else "Not tested"),
-            color = when {
-                connecting -> Color(0xFF79B5FF)
-                connected == true -> Color(0xFF54D98C)
-                connected == false -> Color(0xFFFF7777)
-                else -> Muted
-            },
-            fontSize = 11.sp
-        )
     }
 }
 
