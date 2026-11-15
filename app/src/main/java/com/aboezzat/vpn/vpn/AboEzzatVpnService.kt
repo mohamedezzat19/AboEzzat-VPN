@@ -94,6 +94,14 @@ class AboEzzatVpnService : VpnService() {
 
     override fun onDestroy() {
         testExecutor.shutdownNow()
+        if (nativeBridgeBound) {
+            try {
+                NativeSocketProtectorBridge.nativeUnbindService()
+            } catch (_: UnsatisfiedLinkError) {
+                // A missing native library must never block service teardown.
+            }
+            nativeBridgeBound = false
+        }
         super.onDestroy()
     }
 
