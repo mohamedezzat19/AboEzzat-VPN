@@ -27,6 +27,7 @@ class Ipv4UdpDnsPacketLoop(
     private val processor: Ipv4UdpDnsPacketProcessor,
     private val onPacketError: (Exception) -> Unit = {}
 ) {
+    private val started = AtomicBoolean(false)
     private val stopped = AtomicBoolean(false)
     private val sourceClosed = AtomicBoolean(false)
     private val processedCount = AtomicLong(0)
@@ -40,6 +41,9 @@ class Ipv4UdpDnsPacketLoop(
      * Call stop() from another thread to close a blocking source read.
      */
     fun run() {
+        check(started.compareAndSet(false, true)) {
+            "Packet loop can only be run once."
+        }
         try {
             while (!stopped.get()) {
                 val packet = source.readPacket() ?: break
