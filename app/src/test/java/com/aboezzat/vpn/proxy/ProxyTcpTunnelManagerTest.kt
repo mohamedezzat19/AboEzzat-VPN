@@ -4,7 +4,6 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.IOException
 import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -24,7 +23,7 @@ class ProxyTcpTunnelManagerTest {
                 val input = BufferedInputStream(peer.getInputStream())
                 readHttpHeaders(input)
                 val output = BufferedOutputStream(peer.getOutputStream())
-                output.write("HTTP/1.1 200 Connection established\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
+                output.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray(Charsets.US_ASCII))
                 output.flush()
                 accepted.countDown()
                 try {
@@ -85,13 +84,13 @@ class ProxyTcpTunnelManagerTest {
 
     private fun readHttpHeaders(input: BufferedInputStream) {
         var matched = 0
-        val ending = "\\r\\n\\r\\n"
+        val ending = "\r\n\r\n"
         while (matched < ending.length) {
             val value = input.read()
             if (value < 0) throw AssertionError("Incomplete HTTP CONNECT request")
             val char = value.toChar()
             matched = if (char == ending[matched]) matched + 1
-            else if (char == '\\r') 1 else 0
+            else if (char == '\r') 1 else 0
         }
     }
 }
