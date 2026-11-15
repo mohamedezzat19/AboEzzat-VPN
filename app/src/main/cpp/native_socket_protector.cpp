@@ -19,6 +19,7 @@ unsigned int g_in_flight = 0;
 bool g_shutting_down = false;
 std::mutex g_engine_mutex;
 bool g_engine_running = false;
+bool g_engine_pending_start = false;
 bool g_engine_stop_requested = false;
 
 bool protect_fd(JNIEnv* env, jobject service, jmethodID method, int fd) {
@@ -137,6 +138,26 @@ extern "C" bool abz_protect_socket_fd(int fd) {
     return protect_fd_from_native(fd);
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeArmEngineStart(
+        JNIEnv*, jclass) {
+    std::lock_guard<std::mutex> lock(g_engine_mutex);
+    if (g_engine_running || g_engine_pending_start) return JNI_FALSE;
+    g_engine_pending_start = true;
+    g_engine_stop_requested = false;
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeCancelEngineStart(
+        JNIEnv*, jclass) {
+    std::lock_guard<std::mutex> lock(g_engine_mutex);
+    if (!g_engine_running) {
+        g_engine_pending_start = false;
+        g_engine_stop_requested = false;
+    }
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
         JNIEnv* env, jclass, jstring cli_args, jint tun_mtu, jboolean packet_information) {
@@ -152,11 +173,17 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
             env->ReleaseStringUTFChars(cli_args, chars);
             return -12;
         }
+        if (!g_engine_pending_start) {
+            env->ReleaseStringUTFChars(cli_args, chars);
+            return -14;
+        }
         if (g_engine_stop_requested) {
+            g_engine_pending_start = false;
             g_engine_stop_requested = false;
             env->ReleaseStringUTFChars(cli_args, chars);
             return -13;
         }
+        g_engine_pending_start = false;
         g_engine_running = true;
     }
 
@@ -172,6 +199,8 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
     {
         std::lock_guard<std::mutex> lock(g_engine_mutex);
         g_engine_running = false;
+        g_engine_pending_start = false;
+        g_engine_stop_requested = false;
     }
     return result;
 }
@@ -182,10 +211,12 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeStopEngine(
     {
         std::lock_guard<std::mutex> lock(g_engine_mutex);
         if (!g_engine_running) {
-            // Covers a stop arriving after the worker was scheduled but just
-            // before nativeRunEngine entered this library.
-            g_engine_stop_requested = true;
-            return 0;
+            // Only queue a stop while Kotlin has armed a specific pending run.
+            if (g_engine_pending_start) {
+                g_engine_stop_requested = true;
+                return 0;
+            }
+            return -1;
         }
     }
     return tun2proxy_stop();
