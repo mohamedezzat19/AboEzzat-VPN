@@ -12,12 +12,20 @@ android {
         applicationId = "com.aboezzat.vpn"
         minSdk = 26
         targetSdk = 35
+        ndkVersion = "27.2.12479018"
         versionCode = 1
         versionName = "0.1.0"
     }
 
     buildFeatures {
         compose = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     compileOptions {
