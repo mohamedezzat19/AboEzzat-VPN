@@ -1,6 +1,6 @@
 # App-owned JNI bridge contract
 
-Status: implementation contract only. No JNI library is currently shipped by AboEzzat VPN.
+Status: JNI callback bridge source and CMake target are now present in the app. The patched tun2proxy engine is not yet linked or shipped.
 
 This document defines the Android socket-protection interface for the pinned tun2proxy fork. It does not establish a TUN or advertise a working VPN.
 
@@ -10,7 +10,7 @@ This document defines the Android socket-protection interface for the pinned tun
 - The service exposes one synchronous method to native code: protectNativeSocket(fd: Int): Boolean.
 - That method calls VpnService.protect(fd) directly. It must not dispatch protection to a Handler, coroutine, or executor.
 - The service must not close the TUN descriptor until the native run call has returned.
-- The native bridge must not cache an Activity. It may hold a JNI global reference to the live service only for one native run.
+- The native bridge must not cache an Activity. It currently holds a JNI global reference to the live service while the Android service is alive; this must be narrowed to the native run lifetime when the engine is integrated.
 
 ## Proposed C ABI
 
@@ -46,15 +46,15 @@ The upstream run/stop functions alone are insufficient. The pinned fork must add
 
 ## JNI callback mechanics
 
-The JNI layer should:
+The current JNI bridge implements the following mechanics:
 
-- Capture JavaVM once from JNI_OnLoad.
-- Create a global reference to the current service before starting native execution.
-- Cache the method ID for protectNativeSocket(I)Z while a valid JNI environment is available.
-- In the native callback, call GetEnv; attach the current native thread only if detached; invoke the Java method synchronously; treat a Java exception as protection failure; detach only if this callback attached the thread.
-- Serialize callback-state teardown so the global reference cannot be deleted while a callback is using it.
-- Clear the global reference only after native run returns and no callback remains in flight.
-- Treat service revocation, a dead service reference, JNI attach failure, or a failed JNI call as protection failure.
+- Captures JavaVM once from JNI_OnLoad.
+- Creates a global reference to the current service when the Android service starts.
+- Caches the method ID for protectNativeSocket(I)Z while a valid JNI environment is available.
+- In the native callback, calls GetEnv; attaches the current native thread only if detached; invokes the Java method synchronously; treats a Java exception as protection failure; detaches only if this callback attached the thread.
+- Serializes callback-state teardown with an in-flight counter so the global reference cannot be deleted while a callback is using it.
+- Clears the global reference only after callbacks in flight have returned. Native run integration still needs to enforce stop/run ordering.
+- Treat missing service binding, JNI attach failure, a Java exception, or a failed JNI call as protection failure.
 
 Do not hold a global lifecycle mutex while invoking Java. Use a short-lived state guard or in-flight callback counter to prevent stop/reference-deletion races without deadlocking Java error handling.
 
