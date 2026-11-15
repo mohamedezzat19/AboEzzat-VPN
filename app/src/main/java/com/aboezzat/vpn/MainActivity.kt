@@ -17,7 +17,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,7 +27,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -40,6 +44,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -149,7 +154,17 @@ private fun Dashboard(store: ProxyProfileStore) {
     val testing = remember { mutableStateMapOf<String, Boolean>() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var tunnelActive by remember { mutableStateOf(AboEzzatVpnService.isTunnelRunning()) }
+    var tunnelConnecting by remember { mutableStateOf(false) }
     var tunnelStatus by remember { mutableStateOf(if (tunnelActive) "Tunnel active" else "Not connected") }
+    var proxyConnected by remember { mutableStateOf(false) }
+    var proxyTesting by remember { mutableStateOf(false) }
+    var proxyStatus by remember { mutableStateOf("Not tested") }
+
+    LaunchedEffect(activeName) {
+        proxyConnected = false
+        proxyTesting = false
+        proxyStatus = "Not tested"
+    }
     val tunnelResultReceiver = remember(mainHandler) {
         object : ResultReceiver(mainHandler) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
@@ -157,10 +172,20 @@ private fun Dashboard(store: ProxyProfileStore) {
                     ?: "Tunnel status updated."
                 when (resultCode) {
                     AboEzzatVpnService.RESULT_STARTED,
+                    AboEzzatVpnService.RESULT_ALREADY_ACTIVE -> {
+                        tunnelActive = true
+                        tunnelConnecting = false
+                    }
                     AboEzzatVpnService.RESULT_STOPPING,
-                    AboEzzatVpnService.RESULT_STOP_FAILED,
-                    AboEzzatVpnService.RESULT_ALREADY_ACTIVE -> tunnelActive = true
-                    AboEzzatVpnService.RESULT_STOPPED, AboEzzatVpnService.RESULT_FAILED -> tunnelActive = false
+                    AboEzzatVpnService.RESULT_STOP_FAILED -> {
+                        tunnelActive = resultCode == AboEzzatVpnService.RESULT_STOP_FAILED
+                        tunnelConnecting = false
+                    }
+                    AboEzzatVpnService.RESULT_STOPPED,
+                    AboEzzatVpnService.RESULT_FAILED -> {
+                        tunnelActive = false
+                        tunnelConnecting = false
+                    }
                 }
                 notice = tunnelStatus
             }
@@ -188,7 +213,49 @@ private fun Dashboard(store: ProxyProfileStore) {
                 context.startService(serviceIntent)
             }
         } catch (error: Exception) {
+            if (action == AboEzzatVpnService.ACTION_START_TUNNEL) tunnelConnecting = false
             notice = error.message ?: "Could not send the tunnel command."
+        }
+    }
+
+    fun testProxyProfile(profile: ProxyProfile) {
+        proxyTesting = true
+        proxyConnected = false
+        proxyStatus = "Testing"
+        val resultReceiver = object : ResultReceiver(mainHandler) {
+            override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                val success = resultData?.getBoolean(
+                    AboEzzatVpnService.EXTRA_SUCCESS,
+                    resultCode == AboEzzatVpnService.RESULT_OK
+                ) ?: (resultCode == AboEzzatVpnService.RESULT_OK)
+                val message = resultData?.getString(AboEzzatVpnService.EXTRA_MESSAGE)
+                    ?: "Proxy service returned no diagnostic message."
+                val latency = resultData?.getLong(AboEzzatVpnService.EXTRA_LATENCY) ?: 0L
+                proxyConnected = success
+                proxyTesting = false
+                proxyStatus = if (success) "Connected" else "Disconnected"
+                testResults[profile.name] = ProxyTestResult(success, message, latency)
+                notice = if (success) "$message (${latency} ms)" else message
+            }
+        }
+        val serviceIntent = Intent(context, AboEzzatVpnService::class.java).apply {
+            action = AboEzzatVpnService.ACTION_TEST_UPSTREAM_PROXY
+            putExtra(AboEzzatVpnService.EXTRA_RESULT_RECEIVER, resultReceiver)
+            putExtra(AboEzzatVpnService.EXTRA_NAME, profile.name)
+            putExtra(AboEzzatVpnService.EXTRA_HOST, profile.host)
+            putExtra(AboEzzatVpnService.EXTRA_PORT, profile.port)
+            putExtra(AboEzzatVpnService.EXTRA_PROTOCOL, profile.protocol.name)
+            putExtra(AboEzzatVpnService.EXTRA_USERNAME, profile.username)
+            putExtra(AboEzzatVpnService.EXTRA_PASSWORD, profile.password)
+            putExtra(AboEzzatVpnService.EXTRA_REMOTE_DNS, profile.remoteDns)
+        }
+        try {
+            context.startService(serviceIntent)
+        } catch (error: Exception) {
+            proxyTesting = false
+            proxyConnected = false
+            proxyStatus = "Disconnected"
+            notice = error.message ?: "Could not start the VPN service for proxy testing."
         }
     }
 
@@ -212,6 +279,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             return
         }
         vpnPermissionGranted = true
+        tunnelConnecting = true
         sendTunnelCommand(AboEzzatVpnService.ACTION_START_TUNNEL, profile)
     }
 
@@ -243,7 +311,44 @@ private fun Dashboard(store: ProxyProfileStore) {
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text(tx("CONNECTION STATUS"), color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
-                    Text(tx(tunnelStatus), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ConnectionCircle(
+                            title = "Proxy",
+                            connected = proxyConnected,
+                            connecting = proxyTesting,
+                            onClick = {
+                                val profile = profiles.firstOrNull { it.name == activeName }
+                                if (profile == null) {
+                                    notice = "Add and select a proxy profile first."
+                                } else {
+                                    testProxyProfile(profile)
+                                }
+                            }
+                        )
+                        ConnectionCircle(
+                            title = "VPN",
+                            connected = tunnelActive,
+                            connecting = tunnelConnecting,
+                            onClick = {
+                                if (tunnelActive) {
+                                    sendTunnelCommand(AboEzzatVpnService.ACTION_STOP_TUNNEL)
+                                } else {
+                                    connectSelectedProfile()
+                                }
+                            }
+                        )
+                    }
+                    Text(
+                        tx(if (proxyTesting) "Testing proxy connection…" else proxyStatus),
+                        color = if (proxyTesting) Muted else if (proxyConnected) Color(0xFF54D98C) else Color(0xFFFF7777),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(tx(tunnelStatus), color = if (tunnelActive) Color(0xFF54D98C) else if (tunnelConnecting) Muted else Color(0xFFFF7777), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     Text(tx("The current tunnel sends device traffic through the selected upstream proxy."),
                         color = Muted, fontSize = 12.sp, lineHeight = 18.sp
                     )
@@ -280,23 +385,9 @@ private fun Dashboard(store: ProxyProfileStore) {
                             }
                         }
                         }
-                    Text(tx("Use Connect after selecting a working proxy profile. The tunnel stays active in the background with a notification."),
+                    Text(tx("Tap the round Proxy button to test the selected server. Tap VPN to start or stop the device tunnel."),
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = { connectSelectedProfile() },
-                            enabled = !tunnelActive && profiles.any { it.name == activeName },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
-                        ) { Text(tx("Connect")) }
-                        Button(
-                            onClick = { sendTunnelCommand(AboEzzatVpnService.ACTION_STOP_TUNNEL) },
-                            enabled = tunnelActive,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34445F), contentColor = Color.White)
-                        ) { Text(tx("Disconnect")) }
-                    }
                 }
             }
 
@@ -610,6 +701,15 @@ private val arabicUi = mapOf(
     "Notification permission was denied. Android may show the VPN status only in system VPN controls." to "تم رفض إذن الإشعارات. قد يعرض Android حالة VPN داخل إعدادات النظام فقط.",
     "Connect" to "اتصال",
     "Disconnect" to "قطع الاتصال",
+    "Proxy" to "البروكسي",
+    "VPN" to "VPN",
+    "Connected" to "متصل",
+    "Disconnected" to "غير متصل",
+    "Connecting…" to "جارٍ الاتصال…",
+    "Testing proxy connection…" to "جارٍ اختبار اتصال البروكسي…",
+    "Not tested" to "لم يتم الاختبار",
+    "Testing" to "جارٍ الاختبار",
+    "Tap the round Proxy button to test the selected server. Tap VPN to start or stop the device tunnel." to "اضغط زر البروكسي الدائري لاختبار الخادم المحدد. واضغط زر VPN لتشغيل نفق الجهاز أو إيقافه.",
     "Add and select a proxy profile first." to "أضف ملف بروكسي وحدده أولًا.",
     "Grant Android VPN permission, then tap Connect again." to "امنح إذن VPN من Android ثم اضغط اتصال مرة أخرى.",
     "Could not send the tunnel command." to "تعذر إرسال أمر النفق.",
@@ -716,6 +816,57 @@ private val arabicUi = mapOf(
     "HTTP CONNECT" to "HTTP CONNECT",
     "SOCKS5" to "SOCKS5"
 )
+
+@Composable
+private fun ConnectionCircle(
+    title: String,
+    connected: Boolean,
+    connecting: Boolean,
+    onClick: () -> Unit
+) {
+    val stateColor = when {
+        connecting -> Color(0xFF4D91E8)
+        connected -> Color(0xFF168B55)
+        else -> Color(0xFFB93643)
+    }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        Surface(
+            modifier = Modifier.size(86.dp).clickable(enabled = !connecting, onClick = onClick),
+            shape = CircleShape,
+            color = stateColor
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (connecting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(31.dp),
+                        color = Color.White,
+                        strokeWidth = 3.dp
+                    )
+                } else {
+                    Text(
+                        if (connected) "✓" else "×",
+                        color = Color.White,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
+        Text(tx(title), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(
+            tx(if (connecting) "Connecting…" else if (connected) "Connected" else "Disconnected"),
+            color = when {
+                connecting -> Color(0xFF79B5FF)
+                connected -> Color(0xFF54D98C)
+                else -> Color(0xFFFF7777)
+            },
+            fontSize = 11.sp
+        )
+    }
+}
 
 @Composable
 private fun InfoCard(title: String, subtitle: String) {
