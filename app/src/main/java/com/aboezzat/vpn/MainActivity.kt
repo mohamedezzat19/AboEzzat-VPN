@@ -940,7 +940,7 @@ private fun ConnectionCircle(
                         color = Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         maxLines = 1
                     )
                 }
