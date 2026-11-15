@@ -188,6 +188,7 @@ class AboEzzatVpnService : VpnService() {
             return
         }
 
+        tunnelRunning = true
         receiver?.send(
             RESULT_STARTED,
             Bundle().apply {
@@ -229,6 +230,7 @@ class AboEzzatVpnService : VpnService() {
         val wasRequestedStop = stopRequested
         activeReceiver = null
         stopRequested = false
+        tunnelRunning = false
 
         if (destroyed) unbindNativeBridge()
 
@@ -383,6 +385,9 @@ class AboEzzatVpnService : VpnService() {
         NativeSocketProtection.protect(fd, ::protect)
 
     companion object {
+        @Volatile private var tunnelRunning = false
+        fun isTunnelRunning(): Boolean = tunnelRunning
+
         const val ACTION_TEST_UPSTREAM_PROXY = "com.aboezzat.vpn.action.TEST_UPSTREAM_PROXY"
         const val ACTION_START_TUNNEL = "com.aboezzat.vpn.action.START_TUNNEL"
         const val ACTION_STOP_TUNNEL = "com.aboezzat.vpn.action.STOP_TUNNEL"
