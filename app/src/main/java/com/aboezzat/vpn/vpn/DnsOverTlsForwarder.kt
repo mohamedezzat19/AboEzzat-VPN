@@ -28,6 +28,12 @@ class DnsOverTlsForwarder(
         require(maxMessageBytes in DnsTcpForwarder.DNS_HEADER_BYTES..DnsTcpForwarder.MAX_DNS_MESSAGE_BYTES)
     }
 
+    fun forward(
+        profile: ProxyProfile,
+        resolverHost: String,
+        query: ByteArray
+    ): ByteArray = forward(profile, resolverHost, query, null)
+
     @Throws(IOException::class)
     override fun forward(
         profile: ProxyProfile,
