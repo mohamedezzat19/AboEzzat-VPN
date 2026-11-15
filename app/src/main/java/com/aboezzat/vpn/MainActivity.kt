@@ -225,6 +225,9 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Text(tx("Per-app routing rules are saved, but this first tunnel mode applies to the whole device."),
                         color = Accent, fontSize = 12.sp, lineHeight = 18.sp
                     )
+                    Text(tx("TCP is sent through the proxy. General UDP support depends on SOCKS5 UDP ASSOCIATE; HTTP CONNECT does not carry arbitrary UDP."),
+                        color = Muted, fontSize = 10.sp, lineHeight = 15.sp
+                    )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(tx("Android VPN permission"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
@@ -572,6 +575,7 @@ private val arabicUi = mapOf(
 
     "The current tunnel sends device traffic through the selected upstream proxy." to "النفق الحالي يمرر حركة مرور الجهاز عبر البروكسي المحدد.",
     "Per-app routing rules are saved, but this first tunnel mode applies to the whole device." to "قواعد التوجيه لكل تطبيق محفوظة، لكن وضع النفق الأول يطبق على الجهاز بالكامل.",
+    "TCP is sent through the proxy. General UDP support depends on SOCKS5 UDP ASSOCIATE; HTTP CONNECT does not carry arbitrary UDP." to "يتم تمرير TCP عبر البروكسي. دعم UDP العام يعتمد على UDP ASSOCIATE في SOCKS5؛ أما HTTP CONNECT فلا ينقل UDP العام.",
     "Use Connect after selecting a working proxy profile. The tunnel stays active in the background with a notification." to "اضغط اتصال بعد اختيار ملف بروكسي يعمل. سيظل النفق نشطًا في الخلفية مع إشعار واضح.",
     "Choose a route for each installed app. These policies are saved, but the current tunnel mode still routes the whole device through the selected proxy." to "اختر مسارًا لكل تطبيق مثبت. تُحفظ السياسات، لكن وضع النفق الحالي يمرر حركة مرور الجهاز بالكامل عبر البروكسي المحدد.",
     "Per-app policies are not enforced by the current whole-device tunnel. Banking bypass and mixed routing will be enabled in a later routing-engine stage." to "لا تُطبّق سياسات كل تطبيق في نفق الجهاز الحالي. سيتم تفعيل تجاوز التطبيقات البنكية والتوجيه المختلط في مرحلة لاحقة من محرك التوجيه.",
