@@ -654,7 +654,7 @@ private val arabicUi = mapOf(
     "Username" to "اسم المستخدم",
     "Password" to "كلمة المرور",
     "Remote DNS" to "DNS عن بُعد",
-    "Use proxy-side DNS when supported" to "استخدم DNS عبر البروكسي عند دعمه",
+    "Use proxy-side DNS when supported" to "استخدم DNS افتراضيًا عبر البروكسي عند تفعيله، أو مرّر استعلامات DNS عبر TCP من خلال البروكسي عند إيقافه.",
     "Credentials are encrypted with Android Keystore before being saved." to "تُشفّر بيانات الاعتماد باستخدام Android Keystore قبل حفظها.",
     "Save" to "حفظ",
     "Cancel" to "إلغاء",
