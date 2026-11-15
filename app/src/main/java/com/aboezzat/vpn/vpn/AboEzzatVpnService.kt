@@ -99,14 +99,8 @@ class AboEzzatVpnService : VpnService() {
      * a hard failure. This method does not create or start a VPN tunnel.
      */
     @androidx.annotation.Keep
-    fun protectNativeSocket(fd: Int): Boolean {
-        if (fd < 0) return false
-        return try {
-            protect(fd)
-        } catch (_: RuntimeException) {
-            false
-        }
-    }
+    fun protectNativeSocket(fd: Int): Boolean =
+        NativeSocketProtection.protect(fd, ::protect)
 
     companion object {
         const val ACTION_TEST_UPSTREAM_PROXY = "com.aboezzat.vpn.action.TEST_UPSTREAM_PROXY"
