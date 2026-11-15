@@ -5,6 +5,7 @@ import android.net.VpnService
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.ResultReceiver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -65,7 +66,7 @@ import com.aboezzat.vpn.data.AppRouteStore
 import com.aboezzat.vpn.core.RouteMode
 import com.aboezzat.vpn.proxy.ProxyProfile
 import com.aboezzat.vpn.proxy.ProxyProtocol
-import com.aboezzat.vpn.proxy.ProxyConnectionTester
+import com.aboezzat.vpn.vpn.AboEzzatVpnService
 import com.aboezzat.vpn.proxy.ProxyTestResult
 
 private val Midnight = Color(0xFF0A1020)
@@ -268,21 +269,48 @@ private fun Dashboard(store: ProxyProfileStore) {
                             onClick = {
                                 testing[profile.name] = true
                                 testResults.remove(profile.name)
-                                Thread({
-                                    val result = ProxyConnectionTester.test(profile)
-                                    mainHandler.post {
-                                        testResults[profile.name] = result
+                                val resultReceiver = object : ResultReceiver(mainHandler) {
+                                    override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                                        val success = resultData?.getBoolean(
+                                            AboEzzatVpnService.EXTRA_SUCCESS,
+                                            resultCode == AboEzzatVpnService.RESULT_OK
+                                        ) ?: (resultCode == AboEzzatVpnService.RESULT_OK)
+                                        val message = resultData?.getString(AboEzzatVpnService.EXTRA_MESSAGE)
+                                            ?: "Proxy service returned no diagnostic message."
+                                        val latency = resultData?.getLong(AboEzzatVpnService.EXTRA_LATENCY) ?: 0L
+                                        testResults[profile.name] = ProxyTestResult(success, message, latency)
                                         testing.remove(profile.name)
                                     }
-                                }, "proxy-test").start()
+                                }
+                                val serviceIntent = Intent(context, AboEzzatVpnService::class.java).apply {
+                                    action = AboEzzatVpnService.ACTION_TEST_UPSTREAM_PROXY
+                                    putExtra(AboEzzatVpnService.EXTRA_RESULT_RECEIVER, resultReceiver)
+                                    putExtra(AboEzzatVpnService.EXTRA_NAME, profile.name)
+                                    putExtra(AboEzzatVpnService.EXTRA_HOST, profile.host)
+                                    putExtra(AboEzzatVpnService.EXTRA_PORT, profile.port)
+                                    putExtra(AboEzzatVpnService.EXTRA_PROTOCOL, profile.protocol.name)
+                                    putExtra(AboEzzatVpnService.EXTRA_USERNAME, profile.username)
+                                    putExtra(AboEzzatVpnService.EXTRA_PASSWORD, profile.password)
+                                    putExtra(AboEzzatVpnService.EXTRA_REMOTE_DNS, profile.remoteDns)
+                                }
+                                try {
+                                    context.startService(serviceIntent)
+                                } catch (error: Exception) {
+                                    testing.remove(profile.name)
+                                    testResults[profile.name] = ProxyTestResult(
+                                        false,
+                                        error.message ?: "Could not start the VPN service for proxy testing.",
+                                        0L
+                                    )
+                                }
                             },
                             enabled = testing[profile.name] != true,
                             colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
                         ) {
-                            Text(if (testing[profile.name] == true) "Testing connection…" else "Test connection")
+                            Text(if (testing[profile.name] == true) "Testing protected socket…" else "Test via VPN service")
                         }
                         Text(
-                            "This checks the proxy handshake only; it does not route traffic through the VPN.",
+                            "This runs the proxy handshake inside the VPN service and calls protect() before connect. No TUN tunnel or device traffic routing is active yet.",
                             color = Muted,
                             fontSize = 10.sp,
                             lineHeight = 14.sp
