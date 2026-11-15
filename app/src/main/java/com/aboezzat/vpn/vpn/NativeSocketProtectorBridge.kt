@@ -33,6 +33,14 @@ internal object NativeSocketProtectorBridge {
      */
     @JvmStatic
     @Keep
+    external fun nativeArmEngineStart(): Boolean
+
+    @JvmStatic
+    @Keep
+    external fun nativeCancelEngineStart()
+
+    @JvmStatic
+    @Keep
     external fun nativeRunEngine(
         cliArgs: String,
         tunMtu: Int,
