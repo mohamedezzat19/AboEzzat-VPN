@@ -158,7 +158,8 @@ private fun Dashboard(store: ProxyProfileStore) {
                 when (resultCode) {
                     AboEzzatVpnService.RESULT_STARTED,
                     AboEzzatVpnService.RESULT_STOPPING,
-                    AboEzzatVpnService.RESULT_STOP_FAILED -> tunnelActive = true
+                    AboEzzatVpnService.RESULT_STOP_FAILED,
+                    AboEzzatVpnService.RESULT_ALREADY_ACTIVE -> tunnelActive = true
                     AboEzzatVpnService.RESULT_STOPPED, AboEzzatVpnService.RESULT_FAILED -> tunnelActive = false
                 }
                 notice = tunnelStatus
