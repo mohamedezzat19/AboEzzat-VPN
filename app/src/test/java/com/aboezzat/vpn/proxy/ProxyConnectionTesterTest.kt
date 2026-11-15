@@ -22,18 +22,18 @@ class ProxyConnectionTesterTest {
                 val input = BufferedInputStream(socket.getInputStream())
                 val request = StringBuilder()
                 var matched = 0
-                val ending = "\\r\\n\\r\\n"
+                val ending = "\r\n\r\n"
                 while (matched < ending.length) {
                     val value = input.read()
                     if (value < 0) break
                     val char = value.toChar()
                     request.append(char)
                     matched = if (char == ending[matched]) matched + 1
-                    else if (char == '\\r') 1 else 0
+                    else if (char == '\r') 1 else 0
                 }
                 requestReceived.set(request.toString().startsWith("CONNECT example.com:443"))
                 val output = BufferedOutputStream(socket.getOutputStream())
-                output.write("HTTP/1.1 200 Connection established\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
+                output.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray(Charsets.US_ASCII))
                 output.flush()
             }
         }
@@ -185,7 +185,7 @@ class ProxyConnectionTesterTest {
                 val input = BufferedInputStream(socket.getInputStream())
                 readUntilHttpHeadersEnd(input)
                 val output = BufferedOutputStream(socket.getOutputStream())
-                output.write("HTTP/1.1 407 Proxy Authentication Required\\r\\nContent-Length: 0\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
+                output.write("HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n".toByteArray(Charsets.US_ASCII))
                 output.flush()
             }
         }
@@ -234,13 +234,13 @@ class ProxyConnectionTesterTest {
 
     private fun readUntilHttpHeadersEnd(input: BufferedInputStream) {
         var matched = 0
-        val ending = "\\r\\n\\r\\n"
+        val ending = "\r\n\r\n"
         while (matched < ending.length) {
             val value = input.read()
             if (value < 0) throw AssertionError("Incomplete HTTP request")
             val char = value.toChar()
             matched = if (char == ending[matched]) matched + 1
-            else if (char == '\\r') 1 else 0
+            else if (char == '\r') 1 else 0
         }
     }
 }
