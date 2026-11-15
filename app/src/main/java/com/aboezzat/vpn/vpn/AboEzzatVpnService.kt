@@ -173,6 +173,17 @@ class AboEzzatVpnService : VpnService() {
             return
         }
 
+        val nativeArmed = try {
+            NativeSocketProtectorBridge.nativeArmEngineStart()
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        }
+        if (!nativeArmed) {
+            runCatching { tun.close() }
+            failStart(receiver, startId, "The native tunnel engine is already starting or unavailable.")
+            return
+        }
+
         activeReceiver = receiver
         stopRequested = false
         val accepted = tunnelRunner.start(
@@ -183,6 +194,7 @@ class AboEzzatVpnService : VpnService() {
         )
         if (!accepted) {
             activeReceiver = null
+            runCatching { NativeSocketProtectorBridge.nativeCancelEngineStart() }
             runCatching { tun.close() }
             failStart(receiver, startId, "The native tunnel worker is not available.")
             return
