@@ -64,6 +64,10 @@ class DnsUdpTcpBridgeTest {
                 }
                 proxyTask.get(3, TimeUnit.SECONDS)
                 assertTrue(bridge.stats().received >= 1)
+                val forwardingDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+                while (bridge.stats().forwarded < 1 && System.nanoTime() < forwardingDeadline) {
+                    Thread.sleep(10)
+                }
                 assertTrue(bridge.stats().forwarded >= 1)
                 assertTrue(bridge.isRunning)
             }
