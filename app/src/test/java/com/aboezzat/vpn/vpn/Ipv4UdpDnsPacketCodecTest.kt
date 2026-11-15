@@ -3,8 +3,8 @@ package com.aboezzat.vpn.vpn
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.net.InetAddress
 
 class Ipv4UdpDnsPacketCodecTest {
     @Test
@@ -31,6 +31,22 @@ class Ipv4UdpDnsPacketCodecTest {
         assertEquals(53, parsedResponse.first)
         assertEquals(53000, parsedResponse.second)
         assertArrayEquals(responseDns, parsedResponse.third)
+        assertTrue("Generated UDP checksum must validate", udpChecksumValid(response))
+    }
+
+    @Test
+    fun rejectsReservedIpv4Flag() {
+        val packet = makeIpv4UdpPacket(
+            byteArrayOf(10, 0, 0, 2), byteArrayOf(10, 0, 0, 1),
+            50000, 53, dnsQuery()
+        )
+        putU16(packet, 6, 0x8000)
+        putU16(packet, 10, 0)
+        putU16(packet, 10, ipv4Checksum(packet, 20))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4UdpDnsPacketCodec.parseQuery(packet)
+        }
     }
 
     @Test
@@ -77,6 +93,28 @@ class Ipv4UdpDnsPacketCodecTest {
         dns.copyInto(packet, udp + 8)
         putU16(packet, 10, ipv4Checksum(packet, 20))
         return packet
+    }
+
+    private fun udpChecksumValid(packet: ByteArray): Boolean {
+        val ihl = (packet[0].toInt() and 0x0f) * 4
+        val udpLength = ((packet[ihl + 4].toInt() and 0xff) shl 8) or
+            (packet[ihl + 5].toInt() and 0xff)
+        var sum = 0L
+        for (offset in listOf(12, 16)) {
+            for (i in offset until offset + 4 step 2) {
+                sum += ((packet[i].toInt() and 0xff) shl 8) or
+                    (packet[i + 1].toInt() and 0xff)
+            }
+        }
+        sum += 17
+        sum += udpLength
+        for (i in ihl until ihl + udpLength step 2) {
+            val high = (packet[i].toInt() and 0xff) shl 8
+            val low = if (i + 1 < ihl + udpLength) packet[i + 1].toInt() and 0xff else 0
+            sum += high or low
+        }
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return (sum.toInt() and 0xffff) == 0xffff
     }
 
     private fun ipv4Checksum(bytes: ByteArray, length: Int): Int {
