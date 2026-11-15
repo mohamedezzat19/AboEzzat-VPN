@@ -16,6 +16,9 @@ import javax.crypto.spec.GCMParameterSpec
 
 class ProxyProfileStore(context: Context) {
     private val prefs = context.getSharedPreferences("proxy_profiles_v1", Context.MODE_PRIVATE)
+    @Volatile private var credentialReadFailure = false
+
+    fun hasCredentialReadFailure(): Boolean = credentialReadFailure
 
     fun loadProfiles(): List<ProxyProfile> {
         return try {
@@ -40,26 +43,36 @@ class ProxyProfileStore(context: Context) {
                 }
             }
         } catch (_: Exception) {
+            credentialReadFailure = true
             emptyList()
         }
     }
 
-    fun saveProfiles(profiles: List<ProxyProfile>) {
-        val array = JSONArray()
-        profiles.forEach { profile ->
-            array.put(
-                JSONObject().apply {
-                    put("name", profile.name)
-                    put("host", profile.host)
-                    put("port", profile.port)
-                    put("protocol", profile.protocol.name)
-                    put("username", encrypt(profile.username.orEmpty()))
-                    put("password", encrypt(profile.password.orEmpty()))
-                    put("remoteDns", profile.remoteDns)
-                }
-            )
+    /**
+     * Refuses to overwrite stored profiles if a credential could not be
+     * decrypted, preserving the original encrypted values on disk.
+     */
+    fun saveProfiles(profiles: List<ProxyProfile>): Boolean {
+        if (credentialReadFailure) return false
+        return try {
+            val array = JSONArray()
+            profiles.forEach { profile ->
+                array.put(
+                    JSONObject().apply {
+                        put("name", profile.name)
+                        put("host", profile.host)
+                        put("port", profile.port)
+                        put("protocol", profile.protocol.name)
+                        put("username", encrypt(profile.username.orEmpty()))
+                        put("password", encrypt(profile.password.orEmpty()))
+                        put("remoteDns", profile.remoteDns)
+                    }
+                )
+            }
+            prefs.edit().putString("profiles", array.toString()).commit()
+        } catch (_: Exception) {
+            false
         }
-        prefs.edit().putString("profiles", array.toString()).apply()
     }
 
     fun activeProfileName(): String = prefs.getString("active_profile", "") ?: ""
@@ -86,6 +99,7 @@ class ProxyProfileStore(context: Context) {
             cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
             String(cipher.doFinal(encrypted), Charsets.UTF_8)
         } catch (_: Exception) {
+            credentialReadFailure = true
             null
         }
     }
