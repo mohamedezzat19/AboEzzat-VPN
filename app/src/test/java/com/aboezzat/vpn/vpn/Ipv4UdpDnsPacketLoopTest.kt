@@ -15,13 +15,13 @@ class Ipv4UdpDnsPacketLoopTest {
         val source = FakeSource(listOf(invalidPacket, validPacket))
         val written = mutableListOf<ByteArray>()
         var resolverCalls = 0
-        val processor = Ipv4UdpDnsPacketProcessor { dns ->
+        val processor = Ipv4UdpDnsPacketProcessor(resolver = DnsPacketResolver { dns ->
             resolverCalls++
             dns.copyOf().also {
                 it[2] = 0x81.toByte()
                 it[3] = 0x80.toByte()
             }
-        }
+        })
         val loop = Ipv4UdpDnsPacketLoop(
             source = source,
             sink = DnsPacketSink { written += it },
@@ -45,7 +45,7 @@ class Ipv4UdpDnsPacketLoopTest {
         val loop = Ipv4UdpDnsPacketLoop(
             source = source,
             sink = DnsPacketSink { },
-            processor = Ipv4UdpDnsPacketProcessor { it }
+            processor = Ipv4UdpDnsPacketProcessor(resolver = DnsPacketResolver { it })
         )
         loop.run()
         try {
