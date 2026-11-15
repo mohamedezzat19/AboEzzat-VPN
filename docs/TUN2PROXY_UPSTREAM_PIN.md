@@ -17,7 +17,11 @@ The MIT license text must be retained with any vendored or modified source.
 
 This revision is now vendored under `native/tun2proxy/`, with the upstream MIT license retained. The AboEzzat Android socket-protection patch is in `native/tun2proxy/src/lib.rs`; see `native/tun2proxy/UPSTREAM.md` for the exact provenance and verification boundary.
 
-The Rust socket factories now create TCP sockets unconnected and UDP sockets unbound, invoke the app-owned `abz_protect_socket_fd(fd)` callback, and fail closed before connect/bind when protection fails. The Rust engine is now cross-compiled for `arm64-v8a`, `armeabi-v7a`, and `x86_64`, linked into the `abz_protector` JNI shared library, and included in a successful debug APK build. The JNI run/stop entry points are exposed. The service still does **not** establish or run a production TUN session; device-side start/stop and traffic verification remain pending.
+The Rust socket factories now create TCP sockets unconnected and UDP sockets unbound, invoke the app-owned `abz_protect_socket_fd(fd)` callback, and fail closed before connect/bind when protection fails. The Rust engine has been cross-compiled for `arm64-v8a`, `armeabi-v7a`, and `x86_64`, linked into the `abz_protector` JNI shared library, and included in a successful debug APK build.
+
+The Android service now has user-initiated start/stop actions. It resolves the upstream proxy host before creating the VPN route, establishes a dual-stack Android TUN interface, configures virtual DNS or DNS-over-TCP according to the saved profile, and starts the blocking Rust engine on a dedicated worker. A foreground notification represents the active tunnel. The TUN descriptor is retained until the native run call returns; JNI start arming, cancellation, and stop transitions are serialized to cover early-stop races.
+
+The current tunnel is a **whole-device upstream-proxy tunnel**. Saved per-app route policies are not yet enforced. TCP is proxied; general UDP support depends on SOCKS5 UDP ASSOCIATE and is not available through ordinary HTTP CONNECT. Physical-device traffic, DNS, reconnect, revocation, and background lifecycle tests are still pending.
 
 ## Required patch points
 
@@ -41,14 +45,10 @@ reference teardown. The JNI layer now calls the `tun2proxy_run_with_cli_args` an
 
 ## Android build prerequisites for the native phase
 
-The GitHub Actions workflow installs Rust 1.90, runs host-side Rust library tests and Android target checks, builds release static libraries for all three shipped Android ABIs, links each static library into the JNI shared library, and assembles the debug APK. Run `43716191472` completed successfully and uploaded `AboEzzat-VPN-debug`. This confirms the CI build/link/package path, not execution on a physical Android device.
+The GitHub Actions workflow installs Rust 1.90, runs host-side Rust library tests and Android target checks, builds release static libraries for all three shipped Android ABIs, links each static library into the JNI shared library, and assembles the debug APK. Run `43716191472` completed successfully and uploaded `AboEzzat-VPN-debug`. Later service and lifecycle changes are being revalidated by CI; a successful build does not prove execution on a physical Android device.
 
-The Kotlin `Tun2ProxyCommandBuilder` now creates the native CLI for HTTP CONNECT and SOCKS5 profiles, percent-encodes credentials, brackets IPv6 proxy hosts, enables virtual DNS, and passes the TUN descriptor with `--close-fd-on-drop false` so the service retains descriptor ownership. Unit tests cover these cases.
+The Kotlin `Tun2ProxyCommandBuilder` creates the native CLI for HTTP CONNECT and SOCKS5 profiles, percent-encodes credentials, brackets IPv6 proxy hosts, selects virtual DNS or DNS-over-TCP, and passes the TUN descriptor with `--close-fd-on-drop false` so the service retains descriptor ownership. Unit tests cover these cases.
 
 ## Feature gate
 
-Do not call `VpnService.Builder.establish()` for production until the patched
-native engine is cross-compiled and linked, JNI callback lifetime is tied to
-native run/stop, socket-ordering tests pass on Android, and device tests confirm
-that traffic does not loop or leak around the VPN. The current app remains a proxy-preflight
-and configuration foundation, not a functioning device-wide VPN.
+The service now calls `VpnService.Builder.establish()` only after the user initiates connection and Android grants VPN consent. Do not describe this as production-ready until physical-device tests confirm packet forwarding, proxy authentication, DNS behavior, socket protection, stop/revoke cleanup, and no routing loops. Per-app policies remain stored-only; the currently wired mode applies to the whole device.
