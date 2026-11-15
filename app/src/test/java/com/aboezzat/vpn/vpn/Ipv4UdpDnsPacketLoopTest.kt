@@ -3,6 +3,7 @@ package com.aboezzat.vpn.vpn
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class Ipv4UdpDnsPacketLoopTest {
@@ -36,6 +37,24 @@ class Ipv4UdpDnsPacketLoopTest {
         assertTrue(source.closed)
         assertEquals(53, u16(written.single(), 20))
         assertEquals(53000, u16(written.single(), 22))
+    }
+
+    @Test
+    fun rejectsSecondRunAttempt() {
+        val source = FakeSource(emptyList())
+        val loop = Ipv4UdpDnsPacketLoop(
+            source = source,
+            sink = DnsPacketSink { },
+            processor = Ipv4UdpDnsPacketProcessor { it }
+        )
+        loop.run()
+        try {
+            loop.run()
+            fail("Second run must be rejected")
+        } catch (_: IllegalStateException) {
+            // Expected: a packet source has exactly one owning reader.
+        }
+        assertTrue(source.closed)
     }
 
     @Test
