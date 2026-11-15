@@ -1,7 +1,10 @@
 package com.aboezzat.vpn
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -9,6 +12,7 @@ import android.os.ResultReceiver
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -107,6 +111,17 @@ private fun Dashboard(store: ProxyProfileStore) {
     val context = LocalContext.current
     var notice by remember { mutableStateOf("") }
     var vpnPermissionGranted by remember { mutableStateOf(VpnService.prepare(context) == null) }
+    var notificationPermissionRequested by remember { mutableStateOf(false) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        notificationPermissionRequested = true
+        notice = if (granted) {
+            "Notification permission granted. Tap Connect again."
+        } else {
+            "Notification permission was denied. Android may show the VPN status only in system VPN controls."
+        }
+    }
     val vpnPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
@@ -175,6 +190,13 @@ private fun Dashboard(store: ProxyProfileStore) {
     }
 
     fun connectSelectedProfile() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !notificationPermissionRequested
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
         val profile = profiles.firstOrNull { it.name == activeName }
         if (profile == null) {
             notice = "Add and select a proxy profile first."
@@ -579,6 +601,8 @@ private val arabicUi = mapOf(
     "Use Connect after selecting a working proxy profile. The tunnel stays active in the background with a notification." to "اضغط اتصال بعد اختيار ملف بروكسي يعمل. سيظل النفق نشطًا في الخلفية مع إشعار واضح.",
     "Choose a route for each installed app. These policies are saved, but the current tunnel mode still routes the whole device through the selected proxy." to "اختر مسارًا لكل تطبيق مثبت. تُحفظ السياسات، لكن وضع النفق الحالي يمرر حركة مرور الجهاز بالكامل عبر البروكسي المحدد.",
     "Per-app policies are not enforced by the current whole-device tunnel. Banking bypass and mixed routing will be enabled in a later routing-engine stage." to "لا تُطبّق سياسات كل تطبيق في نفق الجهاز الحالي. سيتم تفعيل تجاوز التطبيقات البنكية والتوجيه المختلط في مرحلة لاحقة من محرك التوجيه.",
+    "Notification permission granted. Tap Connect again." to "تم منح إذن الإشعارات. اضغط اتصال مرة أخرى.",
+    "Notification permission was denied. Android may show the VPN status only in system VPN controls." to "تم رفض إذن الإشعارات. قد يعرض Android حالة VPN داخل إعدادات النظام فقط.",
     "Connect" to "اتصال",
     "Disconnect" to "قطع الاتصال",
     "Add and select a proxy profile first." to "أضف ملف بروكسي وحدده أولًا.",
