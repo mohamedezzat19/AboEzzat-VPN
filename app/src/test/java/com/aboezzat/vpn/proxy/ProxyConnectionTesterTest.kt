@@ -98,7 +98,7 @@ class ProxyConnectionTesterTest {
                 val input = BufferedInputStream(socket.getInputStream())
                 val output = BufferedOutputStream(socket.getOutputStream())
 
-                assertEquals(listOf(5, 1, 0), readExactly(input, 3).toList())
+                assertEquals(listOf(5, 1, 0), readExactly(input, 3).map { it.toInt() and 0xff })
                 output.write(byteArrayOf(5, 0))
                 output.flush()
 
@@ -110,8 +110,10 @@ class ProxyConnectionTesterTest {
                     val length = input.read()
                     val host = String(readExactly(input, length), Charsets.US_ASCII)
                     requestWasRemoteDns.set(host == "example.com")
+                    readExactly(input, 2)
+                } else {
+                    skipSocksAddressAndPort(input, addressType)
                 }
-                skipSocksAddressAndPort(input, addressType)
                 writeSocksSuccess(output)
             }
         }
@@ -139,7 +141,7 @@ class ProxyConnectionTesterTest {
                 val input = BufferedInputStream(socket.getInputStream())
                 val output = BufferedOutputStream(socket.getOutputStream())
 
-                assertEquals(listOf(5, 2, 0, 2), readExactly(input, 4).toList())
+                assertEquals(listOf(5, 2, 0, 2), readExactly(input, 4).map { it.toInt() and 0xff })
                 output.write(byteArrayOf(5, 2))
                 output.flush()
 
