@@ -479,6 +479,10 @@ private fun tx(english: String): String {
         english.startsWith("Route for ") -> "مسار التطبيق: " + english.removePrefix("Route for ")
         english.startsWith("Proxy service returned no diagnostic message.") -> "لم تُرجع خدمة البروكسي أي رسالة تشخيصية."
         english.startsWith("Could not start the VPN service for proxy testing.") -> "تعذر تشغيل خدمة VPN لاختبار البروكسي."
+        english.startsWith("HTTP proxy rejected CONNECT:") -> "رفض بروكسي HTTP طلب CONNECT: " + english.substringAfter(":").trim()
+        english.startsWith("SOCKS5 CONNECT failed") -> "فشل اتصال SOCKS5: " + english.substringAfter("failed")
+        english.startsWith("HTTP/1.1 407") -> "رفض البروكسي المصادقة (HTTP 407)."
+        english.startsWith("HTTP/1.0 407") -> "رفض البروكسي المصادقة (HTTP 407)."
         else -> arabicUi[english] ?: english
     }
 }
