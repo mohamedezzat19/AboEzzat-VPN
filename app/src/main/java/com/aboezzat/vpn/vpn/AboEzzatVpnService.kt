@@ -194,6 +194,7 @@ class AboEzzatVpnService : VpnService() {
 
         activeReceiver = receiver
         stopRequested = false
+        tunnelRunning = true
         val accepted = tunnelRunner.start(
             cliArgs = command,
             mtu = TUN_MTU,
@@ -202,13 +203,13 @@ class AboEzzatVpnService : VpnService() {
         )
         if (!accepted) {
             activeReceiver = null
+            tunnelRunning = false
             runCatching { NativeSocketProtectorBridge.nativeCancelEngineStart() }
             runCatching { tun.close() }
             failStart(receiver, startId, "The native tunnel worker is not available.")
             return
         }
 
-        tunnelRunning = true
         updateTunnelNotification("Tunnel active via ${profile.name}")
         receiver?.send(
             RESULT_STARTED,
