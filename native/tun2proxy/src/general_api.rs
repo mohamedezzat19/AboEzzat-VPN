@@ -82,8 +82,9 @@ pub fn general_run_for_api(args: Args, tun_mtu: u16, packet_information: bool) -
         let timer_handle = std::thread::spawn(move || {
             if timer_cancel_rx.recv_timeout(crate::FORCE_EXIT_TIMEOUT).is_err() {
                 // Delay some seconds then try to exit current process if not exited yet, normally this case should not happen
-                log::info!("Forcing exit now.");
-                std::process::exit(-1);
+                // This crate is embedded in an Android app. A library must
+                // never terminate the host process as a cleanup fallback.
+                log::error!("tun2proxy shutdown exceeded the expected cleanup window.");
             }
             log::info!("Exit timer cancelled. Exiting normally without forcing exit.");
         });
