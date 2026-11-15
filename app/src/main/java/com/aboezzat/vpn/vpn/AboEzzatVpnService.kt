@@ -91,7 +91,14 @@ class AboEzzatVpnService : VpnService() {
                 val result = if (profile == null) {
                     com.aboezzat.vpn.proxy.ProxyTestResult(false, "Invalid proxy profile.", 0L)
                 } else {
-                    ProxyConnectionTester.test(profile, ::protectUpstreamSocket)
+                    ProxyConnectionTester.test(
+                        profile,
+                        protectSocket = if (::tunnelRunner.isInitialized && tunnelRunner.isActive()) {
+                            ::protectUpstreamSocket
+                        } else {
+                            null
+                        }
+                    )
                 }
                 receiver?.send(
                     if (result.success) RESULT_OK else RESULT_FAILED,
