@@ -81,19 +81,19 @@ object ProxyTcpTunnel {
         val authHeader = if (!profile.username.isNullOrEmpty()) {
             val credentials = "${profile.username}:${profile.password.orEmpty()}"
             val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray(StandardCharsets.UTF_8))
-            "Proxy-Authorization: Basic $encoded\\r\\n"
+            "Proxy-Authorization: Basic $encoded\r\n"
         } else {
             ""
         }
-        val request = "CONNECT $authority HTTP/1.1\\r\\n" +
-            "Host: $authority\\r\\n" +
+        val request = "CONNECT $authority HTTP/1.1\r\n" +
+            "Host: $authority\r\n" +
             authHeader +
-            "Proxy-Connection: Keep-Alive\\r\\n\\r\\n"
+            "Proxy-Connection: Keep-Alive\r\n\r\n"
         output.write(request.toByteArray(StandardCharsets.US_ASCII))
         output.flush()
 
         val response = readHttpHeaders(input)
-        val statusLine = response.substringBefore("\\r\\n")
+        val statusLine = response.substringBefore("\r\n")
         val statusCode = statusLine.split(' ').getOrNull(1)?.toIntOrNull()
         when (statusCode) {
             200 -> Unit
