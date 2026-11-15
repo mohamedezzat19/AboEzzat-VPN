@@ -120,6 +120,13 @@ class AboEzzatVpnService : VpnService() {
 
     private fun startTunnel(intent: Intent, startId: Int) {
         val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
+        if (tunnelRunner.isActive()) {
+            receiver?.send(RESULT_FAILED, Bundle().apply {
+                putBoolean(EXTRA_SUCCESS, false)
+                putString(EXTRA_MESSAGE, "A tunnel session is already active.")
+            })
+            return
+        }
         startTunnelForeground()
 
         if (!nativeBridgeBound) {
@@ -130,11 +137,6 @@ class AboEzzatVpnService : VpnService() {
             failStart(receiver, startId, "Android VPN permission is required.")
             return
         }
-        if (tunnelRunner.isActive()) {
-            failStart(receiver, startId, "A tunnel session is already active.")
-            return
-        }
-
         val profile = parseProfile(intent)
         if (profile == null) {
             failStart(receiver, startId, "Invalid proxy profile.")
