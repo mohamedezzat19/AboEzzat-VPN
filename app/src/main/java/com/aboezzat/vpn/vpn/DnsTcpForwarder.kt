@@ -14,7 +14,7 @@ fun interface DnsRequestForwarder {
         profile: ProxyProfile,
         resolverHost: String,
         query: ByteArray,
-        protectSocket: ((Socket) -> Boolean)? = null
+        protectSocket: ((Socket) -> Boolean)?
     ): ByteArray
 }
 
@@ -32,6 +32,12 @@ class DnsTcpForwarder(
         require(connectTimeoutMs > 0 && readTimeoutMs > 0)
         require(maxMessageBytes in DNS_HEADER_BYTES..MAX_DNS_MESSAGE_BYTES)
     }
+
+    fun forward(
+        profile: ProxyProfile,
+        resolverHost: String,
+        query: ByteArray
+    ): ByteArray = forward(profile, resolverHost, query, null)
 
     @Throws(IOException::class)
     override fun forward(
