@@ -486,7 +486,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 Text(app.packageName, color = Muted, fontSize = 9.sp)
                             }
                             TextButton(onClick = { selectedRouteApp = app }) {
-                                Text((appRoutes[app.packageName] ?: RouteMode.VPN_ONLY).displayName(), color = Accent, fontSize = 10.sp)
+                                Text((appRoutes[app.packageName] ?: RouteMode.PROXY_ONLY).displayName(), color = Accent, fontSize = 10.sp)
                             }
                         }
                     }
@@ -513,7 +513,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     RouteMode.values().forEach { mode ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(
-                                selected = (appRoutes[app.packageName] ?: RouteMode.VPN_ONLY) == mode,
+                                selected = (appRoutes[app.packageName] ?: RouteMode.PROXY_ONLY) == mode,
                                 onClick = {
                                     appRoutes[app.packageName] = mode
                                     routeStore.save(appRoutes.toMap())
