@@ -29,6 +29,12 @@ Therefore, independently enforcing direct, proxy-only, VPN-only, and proxy-then-
 
 Official Android documentation: https://developer.android.com/develop/connectivity/vpn
 
+## Native tunnel engine investigation
+
+The Android integration research for upstream `tun2proxy v0.8.7` is documented in [ANDROID_NATIVE_TUNNEL_INTEGRATION.md](docs/ANDROID_NATIVE_TUNNEL_INTEGRATION.md). The upstream C run/stop entry points are identifiable, but its normal Android socket-creation path does not expose a `VpnService.protect(int)` hook. A patched native socket-protection callback is therefore a hard prerequisite; the unmodified engine must not be connected to an established TUN.
+
+This is a research milestone only. No native library is bundled, no JNI bridge is enabled, and no TUN is established by the app.
+
 ## Repository layout
 
 - `app/src/main/java/com/aboezzat/vpn/core/` — route policy model.
