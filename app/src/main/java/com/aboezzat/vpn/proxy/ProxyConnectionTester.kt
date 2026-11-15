@@ -5,6 +5,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.io.IOException
 import java.net.Socket
 import java.nio.charset.StandardCharsets
 
@@ -20,12 +21,15 @@ object ProxyConnectionTester {
     private const val TEST_HOST = "example.com"
     private const val TEST_PORT = 443
 
-    fun test(profile: ProxyProfile): ProxyTestResult {
+    fun test(profile: ProxyProfile, protectSocket: ((Socket) -> Boolean)? = null): ProxyTestResult {
         profile.validate()?.let { return ProxyTestResult(false, it, 0) }
         var latency = 0L
         return try {
             val start = System.nanoTime()
             Socket().use { socket ->
+                if (protectSocket != null && !protectSocket(socket)) {
+                    throw IOException("Could not protect the upstream socket from VPN routing.")
+                }
                 socket.connect(InetSocketAddress(profile.host, profile.port), CONNECT_TIMEOUT_MS)
                 socket.soTimeout = READ_TIMEOUT_MS
                 val input = BufferedInputStream(socket.getInputStream())
