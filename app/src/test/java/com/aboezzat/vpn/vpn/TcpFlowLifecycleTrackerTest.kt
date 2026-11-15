@@ -22,7 +22,7 @@ class TcpFlowLifecycleTrackerTest {
         val ack = parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_ACK))
         val third = tracker.observe(ack, TcpFlowLifecycleTracker.Direction.OUTBOUND, 30)
         assertEquals(TcpFlowLifecycleTracker.State.ESTABLISHED, (third as TcpFlowLifecycleTracker.ObserveResult.Updated).snapshot.state)
-        assertEquals(3, (third).snapshot.packetsSeen)
+        assertEquals(3L, (third).snapshot.packetsSeen)
     }
 
     @Test
