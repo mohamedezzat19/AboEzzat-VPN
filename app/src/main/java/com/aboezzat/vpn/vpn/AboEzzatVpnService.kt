@@ -195,6 +195,13 @@ class AboEzzatVpnService : VpnService() {
         activeReceiver = receiver
         stopRequested = false
         tunnelRunning = true
+        receiver?.send(
+            RESULT_STARTED,
+            Bundle().apply {
+                putBoolean(EXTRA_SUCCESS, true)
+                putString(EXTRA_MESSAGE, "TUN established. Starting the upstream proxy tunnel.")
+            }
+        )
         val accepted = tunnelRunner.start(
             cliArgs = command,
             mtu = TUN_MTU,
@@ -211,13 +218,6 @@ class AboEzzatVpnService : VpnService() {
         }
 
         updateTunnelNotification("Tunnel active via ${profile.name}")
-        receiver?.send(
-            RESULT_STARTED,
-            Bundle().apply {
-                putBoolean(EXTRA_SUCCESS, true)
-                putString(EXTRA_MESSAGE, "TUN established. Starting the upstream proxy tunnel.")
-            }
-        )
     }
 
     private fun stopTunnel(intent: Intent, startId: Int) {
