@@ -3,7 +3,6 @@ package com.aboezzat.vpn.proxy
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.ServerSocket
-import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
@@ -24,11 +23,11 @@ class ProxyTcpTunnelTest {
                     val input = BufferedInputStream(peer.getInputStream())
                     val request = readHttpHeaders(input)
                     requestValid.set(
-                        request.startsWith("CONNECT example.com:443 HTTP/1.1\\r\\n") &&
-                            request.contains("Proxy-Authorization: Basic dXNlcjpwYXNz\\r\\n")
+                        request.startsWith("CONNECT example.com:443 HTTP/1.1\r\n") &&
+                            request.contains("Proxy-Authorization: Basic dXNlcjpwYXNz\r\n")
                     )
                     val output = BufferedOutputStream(peer.getOutputStream())
-                    output.write("HTTP/1.1 200 Connection established\\r\\n\\r\\n".toByteArray(Charsets.US_ASCII))
+                    output.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray(Charsets.US_ASCII))
                     output.flush()
                     val payload = ByteArray(4)
                     input.readFully(payload)
@@ -172,14 +171,14 @@ class ProxyTcpTunnelTest {
     private fun readHttpHeaders(input: BufferedInputStream): String {
         val result = StringBuilder()
         var matched = 0
-        val ending = "\\r\\n\\r\\n"
+        val ending = "\r\n\r\n"
         while (matched < ending.length) {
             val value = input.read()
             if (value < 0) throw AssertionError("Incomplete HTTP CONNECT request")
             val char = value.toChar()
             result.append(char)
             matched = if (char == ending[matched]) matched + 1
-            else if (char == '\\r') 1 else 0
+            else if (char == '\r') 1 else 0
         }
         return result.toString()
     }
@@ -190,7 +189,7 @@ class ProxyTcpTunnelTest {
         return bytes
     }
 
-    private fun BufferedInputStream.readFully(bytes: ByteArray) {
+    private fun java.io.InputStream.readFully(bytes: ByteArray) {
         var offset = 0
         while (offset < bytes.size) {
             val count = read(bytes, offset, bytes.size - offset)
@@ -199,13 +198,4 @@ class ProxyTcpTunnelTest {
         }
     }
 
-    private fun Socket.getInputStreamReadFully(bytes: ByteArray) {
-        val stream = getInputStream()
-        var offset = 0
-        while (offset < bytes.size) {
-            val count = stream.read(bytes, offset, bytes.size - offset)
-            if (count < 0) throw AssertionError("Unexpected end of tunnel stream")
-            offset += count
-        }
-    }
 }
