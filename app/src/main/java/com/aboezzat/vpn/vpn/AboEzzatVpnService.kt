@@ -128,14 +128,22 @@ class AboEzzatVpnService : VpnService() {
             })
             return
         }
-        startTunnelForeground()
-
         if (!nativeBridgeBound) {
             failStart(receiver, startId, "Native tunnel engine could not be loaded.")
             return
         }
         if (VpnService.prepare(this) != null) {
             failStart(receiver, startId, "Android VPN permission is required.")
+            return
+        }
+        try {
+            startTunnelForeground()
+        } catch (error: Exception) {
+            failStart(
+                receiver,
+                startId,
+                error.message ?: "Android did not allow the VPN foreground service to start."
+            )
             return
         }
         val profile = parseProfile(intent)
@@ -201,6 +209,7 @@ class AboEzzatVpnService : VpnService() {
         }
 
         tunnelRunning = true
+        updateTunnelNotification("Tunnel active via ${profile.name}")
         receiver?.send(
             RESULT_STARTED,
             Bundle().apply {
@@ -223,6 +232,7 @@ class AboEzzatVpnService : VpnService() {
         }
 
         stopRequested = true
+        updateTunnelNotification("Stopping the tunnel and releasing resources")
         val accepted = tunnelRunner.stop()
         receiver?.send(
             if (accepted) RESULT_STOPPING else RESULT_FAILED,
@@ -240,6 +250,7 @@ class AboEzzatVpnService : VpnService() {
     private fun onNativeTunnelFinished(result: Int) {
         val receiver = activeReceiver
         val wasRequestedStop = stopRequested
+        val successfulStop = result == 0 || (result == -13 && wasRequestedStop)
         activeReceiver = null
         stopRequested = false
         tunnelRunning = false
@@ -249,14 +260,14 @@ class AboEzzatVpnService : VpnService() {
         mainHandler.post {
             if (!destroyed) {
                 val message = when {
-                    result == 0 && wasRequestedStop -> "Tunnel stopped and native resources released."
-                    result == 0 -> "Tunnel engine exited."
+                    successfulStop && wasRequestedStop -> "Tunnel stopped and native resources released."
+                    successfulStop -> "Tunnel engine exited."
                     else -> "Native tunnel stopped with error code $result."
                 }
                 receiver?.send(
-                    if (result == 0) RESULT_STOPPED else RESULT_FAILED,
+                    if (successfulStop) RESULT_STOPPED else RESULT_FAILED,
                     Bundle().apply {
-                        putBoolean(EXTRA_SUCCESS, result == 0)
+                        putBoolean(EXTRA_SUCCESS, successfulStop)
                         putString(EXTRA_MESSAGE, message)
                     }
                 )
@@ -320,6 +331,17 @@ class AboEzzatVpnService : VpnService() {
             password = intent.getStringExtra(EXTRA_PASSWORD),
             remoteDns = intent.getBooleanExtra(EXTRA_REMOTE_DNS, true)
         )
+
+    private fun updateTunnelNotification(message: String) {
+        val notification = Notification.Builder(this, NOTIFICATION_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle("AboEzzat VPN")
+            .setContentText(message)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+    }
 
     private fun startTunnelForeground() {
         val manager = getSystemService(NotificationManager::class.java)
