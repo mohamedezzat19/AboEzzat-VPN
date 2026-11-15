@@ -41,15 +41,23 @@ jobs:
           cargo check --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features --features udpgw --target armv7-linux-androideabi
           cargo check --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features --features udpgw --target x86_64-linux-android
 
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018 cmake;3.22.1"
+
+      - name: Build patched tun2proxy for Android ABIs
+        run: |
+          NDK_BIN="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK_BIN/aarch64-linux-android26-clang" cargo build --manifest-path native/tun2proxy/Cargo.toml --lib --release --no-default-features --features udpgw --target aarch64-linux-android
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$NDK_BIN/armv7a-linux-androideabi26-clang" cargo build --manifest-path native/tun2proxy/Cargo.toml --lib --release --no-default-features --features udpgw --target armv7-linux-androideabi
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$NDK_BIN/x86_64-linux-android26-clang" cargo build --manifest-path native/tun2proxy/Cargo.toml --lib --release --no-default-features --features udpgw --target x86_64-linux-android
+
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018 cmake;3.22.1"
 
       - name: Build debug APK
         run: gradle :app:testDebugUnitTest :app:assembleDebug
