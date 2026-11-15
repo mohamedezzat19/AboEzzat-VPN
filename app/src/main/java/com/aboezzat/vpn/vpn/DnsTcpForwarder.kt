@@ -14,7 +14,7 @@ fun interface DnsRequestForwarder {
         profile: ProxyProfile,
         resolverHost: String,
         query: ByteArray,
-        protectSocket: ((Socket) -> Boolean)? = null
+        protectSocket: ((Socket) -> Boolean)?
     ): ByteArray
 }
 
