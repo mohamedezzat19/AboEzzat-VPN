@@ -900,7 +900,8 @@ private val arabicUi = mapOf(
     "Port must be between 1 and 65535" to "يجب أن يكون المنفذ بين 1 و65535",
     "Username and password must both be provided, or both left empty" to "يجب إدخال اسم المستخدم وكلمة المرور معًا أو تركهما فارغين",
     "HTTP CONNECT" to "HTTP CONNECT",
-    "SOCKS5" to "SOCKS5"
+    "SOCKS5" to "SOCKS5",
+    "Select the same protocol enabled in Android Server Proxy. HTTP/HTTPS uses HTTP CONNECT; choose SOCKS5 only if the server offers SOCKS5." to "اختر نفس البروتوكول المفعّل في Android Server Proxy. خيار HTTP/HTTPS يستخدم HTTP CONNECT؛ اختر SOCKS5 فقط إذا كان الخادم يوفره."
 )
 
 @Composable
@@ -1005,6 +1006,12 @@ private fun ProfileEditorDialog(
                     RadioButton(selected = protocol == ProxyProtocol.SOCKS5, onClick = { protocol = ProxyProtocol.SOCKS5 })
                     Text(tx("SOCKS5"), color = Color.White, fontSize = 12.sp)
                 }
+                Text(
+                    tx("Select the same protocol enabled in Android Server Proxy. HTTP/HTTPS uses HTTP CONNECT; choose SOCKS5 only if the server offers SOCKS5."),
+                    color = Muted,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
+                )
                 Divider(color = Color(0xFF33415B))
                 Text(tx("AUTHENTICATION (OPTIONAL)"), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text(tx("Username")) }, singleLine = true)
