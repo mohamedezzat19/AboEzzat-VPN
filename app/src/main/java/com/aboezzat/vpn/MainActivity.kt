@@ -541,7 +541,13 @@ private val arabicUi = mapOf(
     "Secure profile storage could not save changes. Existing profiles were preserved." to "تعذر حفظ التغييرات في التخزين الآمن. تم الحفاظ على الملفات الحالية.",
     "installed apps found" to "تطبيقات قابلة للتشغيل",
     "Check" to "تحقق",
-    "Authorize" to "منح الإذن"
+    "Authorize" to "منح الإذن",
+    "Profile name is required" to "اسم ملف البروكسي مطلوب",
+    "Enter a valid server IP or hostname" to "أدخل عنوان IP أو اسم مضيف صحيحًا",
+    "Port must be between 1 and 65535" to "يجب أن يكون المنفذ بين 1 و65535",
+    "Username and password must both be provided, or both left empty" to "يجب إدخال اسم المستخدم وكلمة المرور معًا أو تركهما فارغين",
+    "HTTP CONNECT" to "HTTP CONNECT",
+    "SOCKS5" to "SOCKS5"
 )
 
 @Composable
