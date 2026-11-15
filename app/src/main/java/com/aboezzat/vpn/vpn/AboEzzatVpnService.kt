@@ -235,7 +235,7 @@ class AboEzzatVpnService : VpnService() {
         updateTunnelNotification("Stopping the tunnel and releasing resources")
         val accepted = tunnelRunner.stop()
         receiver?.send(
-            if (accepted) RESULT_STOPPING else RESULT_FAILED,
+            if (accepted) RESULT_STOPPING else RESULT_STOP_FAILED,
             Bundle().apply {
                 putBoolean(EXTRA_SUCCESS, accepted)
                 putString(
@@ -443,6 +443,7 @@ class AboEzzatVpnService : VpnService() {
         const val RESULT_STARTED = 2
         const val RESULT_STOPPING = 3
         const val RESULT_STOPPED = 4
+        const val RESULT_STOP_FAILED = 5
 
         private const val TUN_MTU = 1500
         private const val IPV4_TUN_ADDRESS = "10.77.0.2"
