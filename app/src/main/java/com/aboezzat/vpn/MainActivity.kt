@@ -1,10 +1,13 @@
 package com.aboezzat.vpn
 
 import android.content.Intent
+import android.net.VpnService
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +49,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -90,6 +94,17 @@ class MainActivity : ComponentActivity() {
 private fun Dashboard(store: ProxyProfileStore) {
     val profiles = remember { mutableStateListOf<ProxyProfile>().apply { addAll(store.loadProfiles()) } }
     val context = LocalContext.current
+    var vpnPermissionGranted by remember { mutableStateOf(VpnService.prepare(context) == null) }
+    val vpnPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        vpnPermissionGranted = VpnService.prepare(context) == null
+        notice = if (vpnPermissionGranted) {
+            "Android VPN permission granted. Tunnel is still OFF."
+        } else {
+            "VPN permission was not granted."
+        }
+    }
     val routeStore = remember(context) { AppRouteStore(context) }
     val installedApps = remember(context) {
         mutableStateListOf<LaunchableApp>().apply { addAll(loadLaunchableApps(context)) }
@@ -138,6 +153,35 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Text(
                         "We are preparing and testing the upstream proxy before enabling the VPN tunnel.",
                         color = Accent, fontSize = 12.sp, lineHeight = 18.sp
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Android VPN permission", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (vpnPermissionGranted) "Permission granted · tunnel remains off"
+                                else "Permission required before a VPN can be started",
+                                color = if (vpnPermissionGranted) Accent else Muted,
+                                fontSize = 10.sp
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                val prepareIntent = VpnService.prepare(context)
+                                if (prepareIntent == null) {
+                                    vpnPermissionGranted = true
+                                    notice = "Android VPN permission already granted. Tunnel is still OFF."
+                                } else {
+                                    vpnPermissionLauncher.launch(prepareIntent)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
+                        ) {
+                            Text(if (vpnPermissionGranted) "Check" else "Authorize")
+                        }
+                    }
+                    Text(
+                        "This only checks Android consent. It does NOT connect, create a TUN interface, or redirect traffic.",
+                        color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
                 }
             }
