@@ -1,6 +1,8 @@
 package com.aboezzat.vpn
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -41,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
@@ -55,6 +58,8 @@ import androidx.compose.ui.unit.sp
 import com.aboezzat.vpn.data.ProxyProfileStore
 import com.aboezzat.vpn.proxy.ProxyProfile
 import com.aboezzat.vpn.proxy.ProxyProtocol
+import com.aboezzat.vpn.proxy.ProxyConnectionTester
+import com.aboezzat.vpn.proxy.ProxyTestResult
 
 private val Midnight = Color(0xFF0A1020)
 private val Panel = Color(0xFF141F33)
@@ -86,6 +91,9 @@ private fun Dashboard(store: ProxyProfileStore) {
     var showEditor by remember { mutableStateOf(false) }
     var editorError by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
+    val testResults = remember { mutableStateMapOf<String, ProxyTestResult>() }
+    val testing = remember { mutableStateMapOf<String, Boolean>() }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
         Column(
@@ -198,6 +206,33 @@ private fun Dashboard(store: ProxyProfileStore) {
                             Text(profile.protocol.name.replace("_", " "), color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.weight(1f))
                             Text(if (profile.username.isNullOrEmpty()) "No authentication" else "Authentication saved securely", color = Muted, fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = {
+                                testing[profile.name] = true
+                                testResults.remove(profile.name)
+                                Thread({
+                                    val result = ProxyConnectionTester.test(profile)
+                                    mainHandler.post {
+                                        testResults[profile.name] = result
+                                        testing.remove(profile.name)
+                                    }
+                                }, "proxy-test").start()
+                            },
+                            enabled = testing[profile.name] != true,
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
+                        ) {
+                            Text(if (testing[profile.name] == true) "Testing connection…" else "Test connection")
+                        }
+                        testResults[profile.name]?.let { result ->
+                            Text(
+                                (if (result.success) "CONNECTED" else "FAILED") +
+                                    " · " + result.message +
+                                    if (result.success) " · ${result.latencyMs} ms" else "",
+                                color = if (result.success) Accent else Color(0xFFFF8B8B),
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
                         }
                     }
                 }
