@@ -559,6 +559,16 @@ private fun tx(english: String): String {
 
 private val arabicUi = mapOf(
     "CONNECTION STATUS" to "حالة الاتصال",
+    "Not connected" to "غير متصل",
+    "TUN established. Starting the upstream proxy tunnel." to "تم إنشاء واجهة TUN. جارٍ تشغيل نفق البروكسي الأصلي.",
+    "Tunnel is already stopped." to "النفق متوقف بالفعل.",
+    "Tunnel stop requested. Waiting for native cleanup." to "تم طلب إيقاف النفق. جارٍ انتظار إنهاء المحرك وتنظيف الموارد.",
+    "The native engine did not accept the stop request." to "لم يقبل المحرك الأصلي طلب الإيقاف.",
+    "Tunnel stopped and native resources released." to "توقف النفق وتم تحرير موارد المحرك.",
+    "Tunnel engine exited." to "انتهى تشغيل محرك النفق.",
+    "Tunnel status updated." to "تم تحديث حالة النفق.",
+    "Native tunnel stopped with error code" to "توقف محرك النفق برمز خطأ",
+
     "The current tunnel sends device traffic through the selected upstream proxy." to "النفق الحالي يمرر حركة مرور الجهاز عبر البروكسي المحدد.",
     "Per-app routing rules are saved, but this first tunnel mode applies to the whole device." to "قواعد التوجيه لكل تطبيق محفوظة، لكن وضع النفق الأول يطبق على الجهاز بالكامل.",
     "Use Connect after selecting a working proxy profile. The tunnel stays active in the background with a notification." to "اضغط اتصال بعد اختيار ملف بروكسي يعمل. سيظل النفق نشطًا في الخلفية مع إشعار واضح.",
