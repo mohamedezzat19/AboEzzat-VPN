@@ -8,7 +8,8 @@ import com.aboezzat.vpn.proxy.ProxyConnectionTester
 import com.aboezzat.vpn.proxy.ProxyProfile
 import com.aboezzat.vpn.proxy.ProxyProtocol
 import java.net.Socket
-import kotlin.concurrent.thread
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * VPN service entry point reserved for the real TUN + packet-forwarding engine.
@@ -18,8 +19,17 @@ import kotlin.concurrent.thread
  */
 class AboEzzatVpnService : VpnService() {
 
+    // Serialize preflight requests so one fast request cannot stop the service
+    // while a later-started request is still waiting or running.
+    private val testExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "upstream-proxy-preflight")
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action != ACTION_TEST_UPSTREAM_PROXY) return START_NOT_STICKY
+        if (intent?.action != ACTION_TEST_UPSTREAM_PROXY) {
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
 
         val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
         val profile = runCatching {
@@ -36,28 +46,50 @@ class AboEzzatVpnService : VpnService() {
             )
         }.getOrNull()
 
-        if (profile == null) {
-            receiver?.send(RESULT_FAILED, Bundle().apply {
-                putString(EXTRA_MESSAGE, "Invalid proxy profile.")
-                putLong(EXTRA_LATENCY, 0L)
-            })
-            stopSelf(startId)
-            return START_NOT_STICKY
-        }
-
-        thread(name = "upstream-proxy-preflight") {
-            val result = ProxyConnectionTester.test(profile, ::protectUpstreamSocket)
-            receiver?.send(
-                if (result.success) RESULT_OK else RESULT_FAILED,
-                Bundle().apply {
-                    putBoolean(EXTRA_SUCCESS, result.success)
-                    putString(EXTRA_MESSAGE, result.message)
-                    putLong(EXTRA_LATENCY, result.latencyMs)
+        testExecutor.execute {
+            try {
+                val result = if (profile == null) {
+                    com.aboezzat.vpn.proxy.ProxyTestResult(
+                        false,
+                        "Invalid proxy profile.",
+                        0L
+                    )
+                } else {
+                    ProxyConnectionTester.test(profile, ::protectUpstreamSocket)
                 }
-            )
-            stopSelf(startId)
+
+                receiver?.send(
+                    if (result.success) RESULT_OK else RESULT_FAILED,
+                    Bundle().apply {
+                        putBoolean(EXTRA_SUCCESS, result.success)
+                        putString(EXTRA_MESSAGE, result.message)
+                        putLong(EXTRA_LATENCY, result.latencyMs)
+                    }
+                )
+            } catch (error: Exception) {
+                receiver?.send(
+                    RESULT_FAILED,
+                    Bundle().apply {
+                        putBoolean(EXTRA_SUCCESS, false)
+                        putString(
+                            EXTRA_MESSAGE,
+                            error.message?.take(140) ?: "Proxy test could not be completed."
+                        )
+                        putLong(EXTRA_LATENCY, 0L)
+                    }
+                )
+            } finally {
+                // Only the latest outstanding start request is allowed to stop
+                // the service. Earlier requests cannot stop a newer request.
+                stopSelfResult(startId)
+            }
         }
         return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        testExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     /**
