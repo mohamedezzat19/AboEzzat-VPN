@@ -253,31 +253,33 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Text(tx("TCP is sent through the proxy. General UDP support depends on SOCKS5 UDP ASSOCIATE; HTTP CONNECT does not carry arbitrary UDP."),
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(tx("Android VPN permission"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                tx(if (vpnPermissionGranted) "Permission granted"
-                                else "Permission required before a VPN can be started"),
-                                color = if (vpnPermissionGranted) Accent else Muted,
-                                fontSize = 10.sp
-                            )
+                    if (!vpnPermissionGranted) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(tx("Android VPN permission"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    tx(if (vpnPermissionGranted) "Permission granted"
+                                    else "Permission required before a VPN can be started"),
+                                    color = if (vpnPermissionGranted) Accent else Muted,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    val prepareIntent = VpnService.prepare(context)
+                                    if (prepareIntent == null) {
+                                        vpnPermissionGranted = true
+                                        notice = "Android VPN permission is already granted."
+                                    } else {
+                                        vpnPermissionLauncher.launch(prepareIntent)
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
+                            ) {
+                                Text(tx(if (vpnPermissionGranted) "Check" else "Authorize"))
+                            }
                         }
-                        Button(
-                            onClick = {
-                                val prepareIntent = VpnService.prepare(context)
-                                if (prepareIntent == null) {
-                                    vpnPermissionGranted = true
-                                    notice = "Android VPN permission is already granted."
-                                } else {
-                                    vpnPermissionLauncher.launch(prepareIntent)
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
-                        ) {
-                            Text(tx(if (vpnPermissionGranted) "Check" else "Authorize"))
                         }
-                    }
                     Text(tx("Use Connect after selecting a working proxy profile. The tunnel stays active in the background with a notification."),
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
