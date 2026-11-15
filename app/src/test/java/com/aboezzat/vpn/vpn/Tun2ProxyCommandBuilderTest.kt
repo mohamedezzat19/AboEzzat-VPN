@@ -18,7 +18,8 @@ class Tun2ProxyCommandBuilderTest {
 
         val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 42)
 
-        assertTrue(command!!.contains("'--tun-fd' '42'"))
+        assertTrue(command!!.startsWith("'tun2proxy-bin' "))
+        assertTrue(command.contains("'--tun-fd' '42'"))
         assertTrue(command.contains("'--close-fd-on-drop' 'false'"))
         assertTrue(command.contains("'--proxy' 'http://proxy.example:8080'"))
         assertTrue(command.contains("'--dns' 'virtual'"))
