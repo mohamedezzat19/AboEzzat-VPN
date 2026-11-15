@@ -56,6 +56,30 @@ A maintained fork or vendored patch must introduce a socket-protection hook at s
 
 A Java/Kotlin wrapper alone cannot protect sockets created internally by Tokio unless the native engine exposes their descriptors before network use.
 
+## Concrete socket patch shape
+
+The v0.8.7 call sites in `src/lib.rs` are `create_tcp_stream(...)` and `create_udp_stream(...)`. The normal Android path currently reaches `TcpStream::connect(peer)` for TCP and `UdpSocket::bind(...)` followed by `connect(peer)` for UDP.
+
+The Android-specific patch should centralize socket creation:
+
+- TCP: create `tokio::net::TcpSocket::new_v4()` or `new_v6()`; call the registered protector with `AsRawFd::as_raw_fd()`; if false, return an error; only then connect.
+- UDP: create a raw nonblocking datagram socket with `socket2` (or equivalent) so the descriptor exists before bind; call protect; if false, close and return an error; only then bind/connect and convert to Tokio's UDP socket.
+- Keep non-Android builds on their existing socket path behind `cfg(target_os = "android")`.
+- On Android tunnel runs, a missing callback must be an error, never an implicit unprotected fallback.
+
+The callback must be registered before native run starts and remain valid until the run thread exits. JNI must call `VpnService.protect(fd)` synchronously; asynchronous protection is too late because the socket must not connect first.
+
+### Proxy hostname resolution
+
+There is another pre-TUN dependency: `general_run_async` resolves the proxy address before starting the packet loop. A hostname lookup must use the underlying Android network, not the TUN being established. For the first integration milestone, require a validated numeric proxy IP (the phone-to-phone proxy is normally a LAN address), or resolve it through an explicitly selected Android `Network` before establishing TUN.
+
+### Failure and lifecycle rules
+
+- A false protect result closes the new socket and aborts that connection. Never retry unprotected.
+- On revoke/stop, call native stop, wait for native run to return, then close the Java-owned TUN descriptor and release JNI references.
+- Do not close the TUN descriptor while native code may still read it.
+- Test IPv4/IPv6, TCP/UDP, false callback, exactly-once callback invocation, and stop racing socket creation.
+
 ## Safe integration sequence
 
 1. Build and test the patched native library for Android arm64-v8a.
