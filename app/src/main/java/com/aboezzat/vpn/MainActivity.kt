@@ -265,7 +265,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 editorError = ""
                                 showEditor = true
                             }) {
-                                Icon(Icons.Rounded.Edit, contentDescription = "Edit profile", tint = Accent)
+                                Icon(Icons.Rounded.Edit, contentDescription = tx("Edit profile"), tint = Accent)
                             }
                             IconButton(onClick = {
                                 val previousProfiles = profiles.toList()
@@ -282,14 +282,14 @@ private fun Dashboard(store: ProxyProfileStore) {
                                     notice = "Profile was not deleted. Secure profile storage could not save changes."
                                 }
                             }) {
-                                Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete profile", tint = Color(0xFFFF8B8B))
+                                Icon(Icons.Rounded.DeleteOutline, contentDescription = tx("Delete profile"), tint = Color(0xFFFF8B8B))
                             }
                         }
                         Divider(color = Color(0xFF26344D))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(profile.protocol.name.replace("_", " "), color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             Spacer(Modifier.weight(1f))
-                            Text(if (profile.username.isNullOrEmpty()) "No authentication" else "Authentication saved securely", color = Muted, fontSize = 10.sp)
+                            Text(tx(if (profile.username.isNullOrEmpty()) "No authentication" else "Authentication saved securely"), color = Muted, fontSize = 10.sp)
                         }
                         Button(
                             onClick = {
@@ -477,12 +477,18 @@ private fun tx(english: String): String {
     return when {
         english.startsWith("Active profile: ") -> "ملف البروكسي النشط: " + english.removePrefix("Active profile: ")
         english.startsWith("Route for ") -> "مسار التطبيق: " + english.removePrefix("Route for ")
+        english.startsWith("Proxy service returned no diagnostic message.") -> "لم تُرجع خدمة البروكسي أي رسالة تشخيصية."
+        english.startsWith("Could not start the VPN service for proxy testing.") -> "تعذر تشغيل خدمة VPN لاختبار البروكسي."
         else -> arabicUi[english] ?: english
     }
 }
 
 private val arabicUi = mapOf(
     "CONNECTION STATUS" to "حالة الاتصال",
+    "Edit profile" to "تعديل الملف",
+    "Delete profile" to "حذف الملف",
+    "Banking mode · manual policy" to "وضع التطبيقات البنكية · إعداد يدوي",
+    "For banking apps such as Tabby, choose Direct bypass on that app's row. This is a saved policy only and does not guarantee a bank will accept the connection." to "للتطبيقات البنكية مثل Tabby، اختر الاتصال المباشر من صف التطبيق. هذا إعداد محفوظ فقط ولا يضمن قبول البنك للاتصال.",
     "Not connected" to "غير متصل",
     "Setup stage · No device traffic is routed or intercepted yet." to "مرحلة الإعداد · لم يتم توجيه حركة مرور الجهاز بعد.",
     "We are preparing and testing the upstream proxy before enabling the VPN tunnel." to "نجهز ونختبر البروكسي الأصلي قبل تفعيل نفق VPN.",
@@ -590,11 +596,11 @@ private fun ProfileEditorDialog(
                 Text(tx("PROXY TYPE"), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = protocol == ProxyProtocol.HTTP_CONNECT, onClick = { protocol = ProxyProtocol.HTTP_CONNECT })
-                    Text("HTTP CONNECT", color = Color.White, fontSize = 12.sp)
+                    Text(tx("HTTP CONNECT"), color = Color.White, fontSize = 12.sp)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = protocol == ProxyProtocol.SOCKS5, onClick = { protocol = ProxyProtocol.SOCKS5 })
-                    Text("SOCKS5", color = Color.White, fontSize = 12.sp)
+                    Text(tx("SOCKS5"), color = Color.White, fontSize = 12.sp)
                 }
                 Divider(color = Color(0xFF33415B))
                 Text(tx("AUTHENTICATION (OPTIONAL)"), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
