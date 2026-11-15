@@ -122,8 +122,8 @@ class AboEzzatVpnService : VpnService() {
     private fun startTunnel(intent: Intent, startId: Int) {
         val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
         if (tunnelRunner.isActive()) {
-            receiver?.send(RESULT_FAILED, Bundle().apply {
-                putBoolean(EXTRA_SUCCESS, false)
+            receiver?.send(RESULT_ALREADY_ACTIVE, Bundle().apply {
+                putBoolean(EXTRA_SUCCESS, true)
                 putString(EXTRA_MESSAGE, "A tunnel session is already active.")
             })
             return
@@ -445,6 +445,7 @@ class AboEzzatVpnService : VpnService() {
         const val RESULT_STOPPING = 3
         const val RESULT_STOPPED = 4
         const val RESULT_STOP_FAILED = 5
+        const val RESULT_ALREADY_ACTIVE = 6
 
         private const val TUN_MTU = 1500
         private const val IPV4_TUN_ADDRESS = "10.77.0.2"
