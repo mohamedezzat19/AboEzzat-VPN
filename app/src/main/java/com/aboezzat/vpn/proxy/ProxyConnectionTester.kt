@@ -1,13 +1,13 @@
 package com.aboezzat.vpn.proxy
 
-import android.util.Base64
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.io.IOException
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 data class ProxyTestResult(
     val success: Boolean,
@@ -23,9 +23,9 @@ object ProxyConnectionTester {
 
     fun test(profile: ProxyProfile, protectSocket: ((Socket) -> Boolean)? = null): ProxyTestResult {
         profile.validate()?.let { return ProxyTestResult(false, it, 0) }
-        var latency = 0L
+        val start = System.nanoTime()
+        fun elapsedMs() = (System.nanoTime() - start) / 1_000_000
         return try {
-            val start = System.nanoTime()
             Socket().use { socket ->
                 if (protectSocket != null && !protectSocket(socket)) {
                     throw IOException("Could not protect the upstream socket from VPN routing.")
@@ -38,16 +38,18 @@ object ProxyConnectionTester {
                     ProxyProtocol.HTTP_CONNECT -> testHttpConnect(profile, input, output)
                     ProxyProtocol.SOCKS5 -> testSocks5(profile, input, output)
                 }
-            }.let {
-                latency = (System.nanoTime() - start) / 1_000_000
-                ProxyTestResult(true, "Proxy tunnel accepted (CONNECT $TEST_HOST:$TEST_PORT)", latency)
             }
+            ProxyTestResult(
+                true,
+                "Proxy CONNECT handshake succeeded. Destination TLS was not tested.",
+                elapsedMs()
+            )
         } catch (e: java.net.SocketTimeoutException) {
-            ProxyTestResult(false, "Connection timed out. Check server IP, port and network.", latency)
+            ProxyTestResult(false, "Connection timed out. Check server IP, port and network.", elapsedMs())
         } catch (e: java.net.UnknownHostException) {
-            ProxyTestResult(false, "Could not resolve the proxy server address.", latency)
+            ProxyTestResult(false, "Could not resolve the proxy server address.", elapsedMs())
         } catch (e: Exception) {
-            ProxyTestResult(false, e.message?.take(140) ?: "Proxy handshake failed.", latency)
+            ProxyTestResult(false, e.message?.take(140) ?: "Proxy handshake failed.", elapsedMs())
         }
     }
 
@@ -58,7 +60,7 @@ object ProxyConnectionTester {
     ) {
         val auth = if (!profile.username.isNullOrEmpty()) {
             val raw = "${profile.username}:${profile.password.orEmpty()}"
-            val encoded = Base64.encodeToString(raw.toByteArray(StandardCharsets.UTF_8), Base64.NO_WRAP)
+            val encoded = Base64.getEncoder().encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
             "Proxy-Authorization: Basic $encoded\r\n"
         } else ""
         val request = "CONNECT $TEST_HOST:$TEST_PORT HTTP/1.1\r\n" +
@@ -121,7 +123,7 @@ object ProxyConnectionTester {
 
         val responseVersion = input.read()
         val reply = input.read()
-        input.read() // reserved
+        input.read()
         val addressType = input.read()
         if (responseVersion != 5) throw IllegalStateException("Invalid SOCKS5 response.")
         if (reply != 0) throw IllegalStateException("SOCKS5 CONNECT failed (reply code $reply).")
