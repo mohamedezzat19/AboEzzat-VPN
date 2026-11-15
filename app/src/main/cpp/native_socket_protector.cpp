@@ -1,11 +1,13 @@
 #include <jni.h>
 #include <condition_variable>
 #include <mutex>
+#include <string>
 
 #include <string>
 
 extern "C" int tun2proxy_run_with_cli_args(const char* cli_args, unsigned short tun_mtu, bool packet_information);
 extern "C" int tun2proxy_stop();
+extern "C" void tun2proxy_clear_stop_request();
 
 namespace {
 JavaVM* g_vm = nullptr;
@@ -15,6 +17,9 @@ jobject g_service = nullptr;
 jmethodID g_protect_method = nullptr;
 unsigned int g_in_flight = 0;
 bool g_shutting_down = false;
+std::mutex g_engine_mutex;
+bool g_engine_running = false;
+bool g_engine_stop_requested = false;
 
 bool protect_fd(JNIEnv* env, jobject service, jmethodID method, int fd) {
     if (fd < 0 || service == nullptr || method == nullptr) return false;
@@ -140,17 +145,48 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
     }
     const char* chars = env->GetStringUTFChars(cli_args, nullptr);
     if (chars == nullptr) return -11;
+
+    {
+        std::lock_guard<std::mutex> lock(g_engine_mutex);
+        if (g_engine_running) {
+            env->ReleaseStringUTFChars(cli_args, chars);
+            return -12;
+        }
+        if (g_engine_stop_requested) {
+            g_engine_stop_requested = false;
+            env->ReleaseStringUTFChars(cli_args, chars);
+            return -13;
+        }
+        g_engine_running = true;
+    }
+
     const int result = tun2proxy_run_with_cli_args(
         chars,
         static_cast<unsigned short>(tun_mtu),
         packet_information == JNI_TRUE
     );
     env->ReleaseStringUTFChars(cli_args, chars);
+    // Clear a stop that raced with native shutdown after Rust dropped its
+    // cancellation token but before this JNI call marked the engine idle.
+    tun2proxy_clear_stop_request();
+    {
+        std::lock_guard<std::mutex> lock(g_engine_mutex);
+        g_engine_running = false;
+    }
     return result;
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeStopEngine(
         JNIEnv*, jclass) {
+    {
+        std::lock_guard<std::mutex> lock(g_engine_mutex);
+        if (!g_engine_running) {
+            // Covers a stop arriving after the worker was scheduled but just
+            // before nativeRunEngine entered this library.
+            g_engine_stop_requested = true;
+            return 0;
+        }
+    }
     return tun2proxy_stop();
 }
