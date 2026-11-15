@@ -184,7 +184,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 val prepareIntent = VpnService.prepare(context)
                                 if (prepareIntent == null) {
                                     vpnPermissionGranted = true
-                                    notice = tx("Android VPN permission already granted. Tunnel is still OFF.")
+                                    notice = "Android VPN permission already granted. Tunnel is still OFF."
                                 } else {
                                     vpnPermissionLauncher.launch(prepareIntent)
                                 }
@@ -253,7 +253,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 onClick = {
                                     activeName = profile.name
                                     store.setActiveProfile(profile.name)
-                                    notice = tx("Active profile: ${profile.name}")
+                                    notice = "Active profile: ${profile.name}"
                                 }
                             )
                             Column(Modifier.weight(1f)) {
@@ -275,11 +275,11 @@ private fun Dashboard(store: ProxyProfileStore) {
                                         activeName = profiles.firstOrNull()?.name.orEmpty()
                                         store.setActiveProfile(activeName)
                                     }
-                                    notice = tx("Profile deleted")
+                                    notice = "Profile deleted"
                                 } else {
                                     profiles.clear()
                                     profiles.addAll(previousProfiles)
-                                    notice = tx("Profile was not deleted. Secure profile storage could not save changes.")
+                                    notice = "Profile was not deleted. Secure profile storage could not save changes."
                                 }
                             }) {
                                 Icon(Icons.Rounded.DeleteOutline, contentDescription = "Delete profile", tint = Color(0xFFFF8B8B))
@@ -355,7 +355,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             }
 
             if (notice.isNotBlank()) {
-                Text(notice, color = Accent, fontSize = 12.sp)
+                Text(tx(notice), color = Accent, fontSize = 12.sp)
             }
 
             Text(tx("PER-APP ROUTING POLICIES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -442,7 +442,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                 if (validation != null) {
                     editorError = validation
                 } else if (profiles.any { it.name.equals(profile.name, true) && it.name != editorProfile?.name }) {
-                    editorError = tx("A profile with this name already exists")
+                    editorError = "A profile with this name already exists"
                 } else {
                     val previousProfiles = profiles.toList()
                     if (editorProfile == null) profiles.add(profile)
@@ -453,7 +453,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     if (!store.saveProfiles(profiles.toList())) {
                         profiles.clear()
                         profiles.addAll(previousProfiles)
-                        editorError = tx("Secure profile storage could not save changes. Existing profiles were preserved.")
+                        editorError = "Secure profile storage could not save changes. Existing profiles were preserved."
                         return@ProfileEditorDialog
                     }
                     if (activeName.isBlank()) {
@@ -464,7 +464,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         store.setActiveProfile(profile.name)
                     }
                     showEditor = false
-                    notice = tx("Profile saved on this device")
+                    notice = "Profile saved on this device"
                 }
             }
         )
@@ -473,7 +473,12 @@ private fun Dashboard(store: ProxyProfileStore) {
 
 @Composable
 private fun tx(english: String): String {
-    return if (LocalConfiguration.current.locales[0].language == "ar") arabicUi[english] ?: english else english
+    if (LocalConfiguration.current.locales[0].language != "ar") return english
+    return when {
+        english.startsWith("Active profile: ") -> "ملف البروكسي النشط: " + english.removePrefix("Active profile: ")
+        english.startsWith("Route for ") -> "مسار التطبيق: " + english.removePrefix("Route for ")
+        else -> arabicUi[english] ?: english
+    }
 }
 
 private val arabicUi = mapOf(
@@ -529,14 +534,12 @@ private val arabicUi = mapOf(
     "Use the normal network directly" to "استخدم الشبكة العادية مباشرة",
     "Android VPN permission already granted. Tunnel is still OFF." to "تم منح إذن VPN من Android. النفق لا يزال متوقفًا.",
     "VPN permission was not granted." to "لم يتم منح إذن VPN.",
-    "Active profile: ${profile.name}" to "ملف البروكسي النشط: ${profile.name}",
     "Profile deleted" to "تم حذف ملف البروكسي",
     "Profile was not deleted. Secure profile storage could not save changes." to "لم يتم حذف الملف. تعذر حفظ التغييرات في التخزين الآمن.",
     "Profile saved on this device" to "تم حفظ ملف البروكسي على هذا الجهاز",
     "A profile with this name already exists" to "يوجد ملف بهذا الاسم بالفعل",
     "Secure profile storage could not save changes. Existing profiles were preserved." to "تعذر حفظ التغييرات في التخزين الآمن. تم الحفاظ على الملفات الحالية.",
     "installed apps found" to "تطبيقات قابلة للتشغيل",
-    "Route for ${app.label}" to "مسار التطبيق: ${app.label}",
     "Check" to "تحقق",
     "Authorize" to "منح الإذن"
 )
@@ -598,7 +601,7 @@ private fun ProfileEditorDialog(
                     }
                     Switch(checked = remoteDns, onCheckedChange = { remoteDns = it })
                 }
-                if (error.isNotBlank()) Text(error, color = Color(0xFFFF8B8B), fontSize = 12.sp)
+                if (error.isNotBlank()) Text(tx(error), color = Color(0xFFFF8B8B), fontSize = 12.sp)
                 Text(tx("Credentials are encrypted with Android Keystore before being saved."), color = Muted, fontSize = 10.sp)
             }
         },
