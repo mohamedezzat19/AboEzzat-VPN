@@ -59,6 +59,9 @@ object ProxyTcpTunnel {
                     profile, destinationHost, destinationPort, input, output
                 )
             }
+            // The timeout is only for connection setup/handshake. A live tunnel
+            // must remain usable while idle, like a normal TCP socket.
+            socket.soTimeout = 0
             return socket
         } catch (error: Exception) {
             try {
