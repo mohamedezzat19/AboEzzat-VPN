@@ -33,12 +33,12 @@ The Android patch must:
 4. Cover IPv4 and IPv6, proxy endpoint resolution, DNS, and any UDP gateway sockets.
 5. Audit all dependency and feature paths for sockets created outside these factories.
 
-The Java/Kotlin callback endpoint currently prepared in this app is
+The Java/Kotlin callback endpoint and a first app-owned JNI bridge are now present. The JNI shared library exposes `abz_protect_socket_fd(int)` and calls
 `AboEzzatVpnService.protectNativeSocket(fd)`. It delegates to the tested,
-fail-closed `NativeSocketProtection` boundary. A JNI implementation still has
-to attach native threads safely, call this method synchronously, handle Java
-exceptions as failure, and keep the service reference alive only for the native
-run lifetime.
+fail-closed `NativeSocketProtection` boundary. The JNI callback handles native
+thread attachment, synchronous Java calls, Java exceptions, and in-flight
+reference teardown. The engine still has to register/use the C ABI and enforce
+run/stop lifetime ordering.
 
 ## Android build prerequisites for the native phase
 
