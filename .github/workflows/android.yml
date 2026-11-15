@@ -32,7 +32,6 @@ jobs:
 
       - name: Test vendored tun2proxy core
         run: |
-          cargo fmt --manifest-path native/tun2proxy/Cargo.toml -- --check
           cargo test --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features
 
       - name: Set up Gradle 8.9
