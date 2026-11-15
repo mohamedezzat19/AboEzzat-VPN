@@ -2,6 +2,11 @@
 #include <condition_variable>
 #include <mutex>
 
+#include <string>
+
+extern "C" int tun2proxy_run_with_cli_args(const char* cli_args, unsigned short tun_mtu, bool packet_information);
+extern "C" int tun2proxy_stop();
+
 namespace {
 JavaVM* g_vm = nullptr;
 std::mutex g_mutex;
@@ -125,4 +130,27 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeProtectSocket(
 // A missing service or a failed Java protection call always fails closed.
 extern "C" bool abz_protect_socket_fd(int fd) {
     return protect_fd_from_native(fd);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
+        JNIEnv* env, jclass, jstring cli_args, jint tun_mtu, jboolean packet_information) {
+    if (env == nullptr || cli_args == nullptr || tun_mtu < 576 || tun_mtu > 65535) {
+        return -10;
+    }
+    const char* chars = env->GetStringUTFChars(cli_args, nullptr);
+    if (chars == nullptr) return -11;
+    const int result = tun2proxy_run_with_cli_args(
+        chars,
+        static_cast<unsigned short>(tun_mtu),
+        packet_information == JNI_TRUE
+    );
+    env->ReleaseStringUTFChars(cli_args, chars);
+    return result;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeStopEngine(
+        JNIEnv*, jclass) {
+    return tun2proxy_stop();
 }
