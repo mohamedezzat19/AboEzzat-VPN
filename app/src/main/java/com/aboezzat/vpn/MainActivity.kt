@@ -112,7 +112,7 @@ private fun Dashboard(store: ProxyProfileStore) {
     ) {
         vpnPermissionGranted = VpnService.prepare(context) == null
         notice = if (vpnPermissionGranted) {
-            "Android VPN permission granted. Tunnel is still OFF."
+            "Android VPN permission granted. Tap Connect when ready."
         } else {
             "VPN permission was not granted."
         }
@@ -232,7 +232,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         Column(Modifier.weight(1f)) {
                             Text(tx("Android VPN permission"), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             Text(
-                                tx(if (vpnPermissionGranted) "Permission granted · tunnel remains off"
+                                tx(if (vpnPermissionGranted) "Permission granted"
                                 else "Permission required before a VPN can be started"),
                                 color = if (vpnPermissionGranted) Accent else Muted,
                                 fontSize = 10.sp
@@ -243,7 +243,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 val prepareIntent = VpnService.prepare(context)
                                 if (prepareIntent == null) {
                                     vpnPermissionGranted = true
-                                    notice = "Android VPN permission already granted. Tunnel is still OFF."
+                                    notice = "Android VPN permission is already granted."
                                 } else {
                                     vpnPermissionLauncher.launch(prepareIntent)
                                 }
@@ -408,7 +408,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         ) {
                             Text(tx(if (testing[profile.name] == true) "Testing protected socket…" else "Test via VPN service"))
                         }
-                        Text(tx("This runs the proxy handshake inside the VPN service and calls protect() before connect. No TUN tunnel or device traffic routing is active yet."),
+                        Text(tx("This tests the upstream proxy handshake and calls protect() before connect. It does not start or stop the tunnel."),
                             color = Muted,
                             fontSize = 10.sp,
                             lineHeight = 14.sp
@@ -600,10 +600,10 @@ private val arabicUi = mapOf(
     "Tunnel engine exited." to "انتهى تشغيل محرك النفق.",
     "Native tunnel stopped with error code" to "توقف محرك النفق برمز خطأ",
 
-    "Android VPN permission granted. Tunnel is still OFF." to "تم منح إذن VPN من Android. النفق لا يزال متوقفًا.",
+    "Android VPN permission granted. Tap Connect when ready." to "تم منح إذن VPN من Android. اضغط اتصال عند الاستعداد.",
     "VPN permission was not granted." to "لم يتم منح إذن VPN.",
-    "Android VPN permission already granted. Tunnel is still OFF." to "تم منح إذن VPN من Android بالفعل. النفق لا يزال متوقفًا.",
-    "Permission granted · tunnel remains off" to "تم منح الإذن · النفق لا يزال متوقفًا",
+    "Android VPN permission is already granted." to "إذن VPN من Android ممنوح بالفعل.",
+    "Permission granted" to "تم منح الإذن",
     "Permission required before a VPN can be started" to "يلزم منح الإذن قبل تشغيل VPN",
     "Proxy CONNECT handshake succeeded. Destination TLS was not tested." to "نجحت مصافحة اتصال البروكسي. لم يتم اختبار TLS مع الوجهة.",
     "Connection timed out. Check server IP, port and network." to "انتهت مهلة الاتصال. تحقق من عنوان الخادم والمنفذ والشبكة.",
@@ -639,7 +639,7 @@ private val arabicUi = mapOf(
     "Authentication saved securely" to "تم حفظ بيانات المصادقة بأمان",
     "Testing protected socket…" to "جارٍ اختبار الاتصال المحمي…",
     "Test via VPN service" to "اختبار عبر خدمة VPN",
-    "This runs the proxy handshake inside the VPN service and calls protect() before connect. No TUN tunnel or device traffic routing is active yet." to "يختبر هذا الاتصال بالبروكسي داخل خدمة VPN ويستدعي protect() قبل الاتصال. لا يوجد نفق TUN أو توجيه لحركة المرور حاليًا.",
+    "This tests the upstream proxy handshake and calls protect() before connect. It does not start or stop the tunnel." to "يختبر هذا مصافحة البروكسي الأصلي ويستدعي protect() قبل الاتصال. ولا يبدأ النفق أو يوقفه.",
     "HANDSHAKE OK" to "نجاح المصافحة",
     "FAILED" to "فشل",
     "PER-APP ROUTING POLICIES" to "سياسات التوجيه لكل تطبيق",
