@@ -44,6 +44,21 @@ class Tun2ProxyCommandBuilderTest {
     }
 
     @Test
+    fun usesTcpDnsForwardingWhenVirtualRemoteDnsIsDisabled() {
+        val profile = ProxyProfile(
+            name = "HTTP",
+            host = "proxy.example",
+            port = 8080,
+            protocol = ProxyProtocol.HTTP_CONNECT,
+            remoteDns = false
+        )
+
+        val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 8)
+
+        assertTrue(command!!.contains("'--dns' 'over-tcp'"))
+    }
+
+    @Test
     fun rejectsInvalidDescriptorAndMtu() {
         val profile = ProxyProfile(
             name = "SOCKS",
