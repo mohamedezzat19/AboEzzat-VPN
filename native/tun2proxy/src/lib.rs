@@ -901,6 +901,15 @@ async fn handle_udp_associate_session(
         }
     };
 
+    // RFC 1928 allows a SOCKS5 UDP relay to report 0.0.0.0 or :: when
+    // it expects the client to use the proxy server's address. Connecting
+    // to an unspecified destination drops UDP traffic on Android/Linux.
+    let udp_addr = if udp_addr.ip().is_unspecified() {
+        SocketAddr::new(server_addr.ip(), udp_addr.port())
+    } else {
+        udp_addr
+    };
+
     let mut udp_server = create_udp_stream(&socket_queue, udp_addr).await?;
 
     let mut buf1 = [0_u8; 4096];
