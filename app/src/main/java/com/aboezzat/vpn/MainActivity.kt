@@ -156,7 +156,9 @@ private fun Dashboard(store: ProxyProfileStore) {
                 tunnelStatus = resultData?.getString(AboEzzatVpnService.EXTRA_MESSAGE)
                     ?: "Tunnel status updated."
                 when (resultCode) {
-                    AboEzzatVpnService.RESULT_STARTED, AboEzzatVpnService.RESULT_STOPPING -> tunnelActive = true
+                    AboEzzatVpnService.RESULT_STARTED,
+                    AboEzzatVpnService.RESULT_STOPPING,
+                    AboEzzatVpnService.RESULT_STOP_FAILED -> tunnelActive = true
                     AboEzzatVpnService.RESULT_STOPPED, AboEzzatVpnService.RESULT_FAILED -> tunnelActive = false
                 }
                 notice = tunnelStatus
