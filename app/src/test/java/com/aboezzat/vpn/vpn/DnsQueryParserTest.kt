@@ -42,10 +42,9 @@ class DnsQueryParserTest {
         val bytes = ArrayList<Byte>()
         fun add(value: Int) { bytes += value.toByte() }
         add(0x12); add(0x34)
-        add(0x01); add(if (rd) 0x00 else 0x00)
+        add(if (rd) 0x01 else 0x00); add(0x00)
         add(0x00); add(0x01) // QDCOUNT
         repeat(6) { add(0) } // ANCOUNT, NSCOUNT, ARCOUNT
-        add(0)
         name.split(".").forEach { label ->
             add(label.length)
             label.toByteArray(Charsets.US_ASCII).forEach { bytes += it }
@@ -53,6 +52,6 @@ class DnsQueryParserTest {
         add(0)
         add(type shr 8); add(type and 0xff)
         add(0); add(1)
-        return bytes.toByteArray().also { if (rd) it[2] = 0x01 }
+        return bytes.toByteArray()
     }
 }
