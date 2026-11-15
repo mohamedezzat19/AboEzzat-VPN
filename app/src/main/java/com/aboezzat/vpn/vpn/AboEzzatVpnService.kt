@@ -1,29 +1,48 @@
 package com.aboezzat.vpn.vpn
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
 import android.os.ResultReceiver
 import com.aboezzat.vpn.proxy.ProxyConnectionTester
 import com.aboezzat.vpn.proxy.ProxyTestRequestParser
+import com.aboezzat.vpn.proxy.ProxyProfile
+import java.net.Inet4Address
+import java.net.InetAddress
 import java.net.Socket
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * VPN service entry point reserved for the real TUN + packet-forwarding engine.
- *
- * It deliberately does not call Builder.establish() yet. Establishing a TUN
- * interface without a functioning packet loop would black-hole device traffic.
+ * Owns both the Android TUN descriptor and the native tun2proxy run lifetime.
+ * The TUN is closed only after the blocking native run function has returned.
  */
 class AboEzzatVpnService : VpnService() {
 
-    // Serialize preflight requests so one fast request cannot stop the service
-    // while a later-started request is still waiting or running.
     private val testExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
         Thread(task, "upstream-proxy-preflight")
     }
-    private var nativeBridgeBound = false
+    private val engineExecutor: ExecutorService = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "aboezzat-native-tunnel")
+    }
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @Volatile private var nativeBridgeBound = false
+    @Volatile private var destroyed = false
+    @Volatile private var stopRequested = false
+    @Volatile private var activeStartId = 0
+    @Volatile private var activeReceiver: ResultReceiver? = null
+
+    private lateinit var tunnelRunner: NativeTunnelRunner
 
     override fun onCreate() {
         super.onCreate()
@@ -32,37 +51,47 @@ class AboEzzatVpnService : VpnService() {
         } catch (_: UnsatisfiedLinkError) {
             false
         }
+
+        tunnelRunner = NativeTunnelRunner(
+            executor = engineExecutor,
+            runEngine = NativeSocketProtectorBridge::nativeRunEngine,
+            stopEngine = NativeSocketProtectorBridge::nativeStopEngine,
+            onFinished = ::onNativeTunnelFinished
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action != ACTION_TEST_UPSTREAM_PROXY) {
-            stopSelfResult(startId)
-            return START_NOT_STICKY
+        return when (intent?.action) {
+            ACTION_TEST_UPSTREAM_PROXY -> {
+                runProxyTest(intent, startId)
+                START_NOT_STICKY
+            }
+            ACTION_START_TUNNEL -> {
+                startTunnel(intent, startId)
+                START_NOT_STICKY
+            }
+            ACTION_STOP_TUNNEL -> {
+                stopTunnel(intent, startId)
+                START_NOT_STICKY
+            }
+            else -> {
+                if (!tunnelRunner.isActive()) stopSelfResult(startId)
+                START_NOT_STICKY
+            }
         }
+    }
 
+    private fun runProxyTest(intent: Intent, startId: Int) {
         val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
-        val profile = ProxyTestRequestParser.parse(
-            name = intent.getStringExtra(EXTRA_NAME),
-            host = intent.getStringExtra(EXTRA_HOST),
-            port = intent.getIntExtra(EXTRA_PORT, 0),
-            protocol = intent.getStringExtra(EXTRA_PROTOCOL),
-            username = intent.getStringExtra(EXTRA_USERNAME),
-            password = intent.getStringExtra(EXTRA_PASSWORD),
-            remoteDns = intent.getBooleanExtra(EXTRA_REMOTE_DNS, true)
-        )
+        val profile = parseProfile(intent)
 
         testExecutor.execute {
             try {
                 val result = if (profile == null) {
-                    com.aboezzat.vpn.proxy.ProxyTestResult(
-                        false,
-                        "Invalid proxy profile.",
-                        0L
-                    )
+                    com.aboezzat.vpn.proxy.ProxyTestResult(false, "Invalid proxy profile.", 0L)
                 } else {
                     ProxyConnectionTester.test(profile, ::protectUpstreamSocket)
                 }
-
                 receiver?.send(
                     if (result.success) RESULT_OK else RESULT_FAILED,
                     Bundle().apply {
@@ -84,44 +113,278 @@ class AboEzzatVpnService : VpnService() {
                     }
                 )
             } finally {
-                // Only the latest outstanding start request is allowed to stop
-                // the service. Earlier requests cannot stop a newer request.
-                stopSelfResult(startId)
+                if (!tunnelRunner.isActive()) stopSelfResult(startId)
             }
         }
-        return START_NOT_STICKY
+    }
+
+    private fun startTunnel(intent: Intent, startId: Int) {
+        val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
+        startTunnelForeground()
+
+        if (!nativeBridgeBound) {
+            failStart(receiver, startId, "Native tunnel engine could not be loaded.")
+            return
+        }
+        if (VpnService.prepare(this) != null) {
+            failStart(receiver, startId, "Android VPN permission is required.")
+            return
+        }
+        if (tunnelRunner.isActive()) {
+            failStart(receiver, startId, "A tunnel session is already active.")
+            return
+        }
+
+        val profile = parseProfile(intent)
+        if (profile == null) {
+            failStart(receiver, startId, "Invalid proxy profile.")
+            return
+        }
+
+        // Resolve the proxy endpoint before creating the TUN route. The native
+        // engine receives a numeric address, preventing a DNS bootstrap loop.
+        val resolvedHost = resolveProxyHost(profile.host)
+        if (resolvedHost == null) {
+            failStart(receiver, startId, "Could not resolve the proxy server address.")
+            return
+        }
+
+        val tun = try {
+            establishTunInterface()
+        } catch (error: Exception) {
+            null
+        }
+        if (tun == null) {
+            failStart(receiver, startId, "Android could not establish the TUN interface.")
+            return
+        }
+
+        val command = Tun2ProxyCommandBuilder.build(
+            profile.copy(host = resolvedHost),
+            tunFd = tun.fd,
+            mtu = TUN_MTU
+        )
+        if (command == null) {
+            runCatching { tun.close() }
+            failStart(receiver, startId, "The selected proxy profile is not valid for the tunnel.")
+            return
+        }
+
+        activeReceiver = receiver
+        activeStartId = startId
+        stopRequested = false
+        val accepted = tunnelRunner.start(
+            cliArgs = command,
+            mtu = TUN_MTU,
+            packetInformation = false,
+            closeTunDescriptor = { tun.close() }
+        )
+        if (!accepted) {
+            activeReceiver = null
+            runCatching { tun.close() }
+            failStart(receiver, startId, "The native tunnel worker is not available.")
+            return
+        }
+
+        receiver?.send(
+            RESULT_STARTED,
+            Bundle().apply {
+                putBoolean(EXTRA_SUCCESS, true)
+                putString(EXTRA_MESSAGE, "TUN established. Starting the upstream proxy tunnel.")
+            }
+        )
+    }
+
+    private fun stopTunnel(intent: Intent, startId: Int) {
+        val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
+        if (!tunnelRunner.isActive()) {
+            receiver?.send(RESULT_STOPPED, Bundle().apply {
+                putBoolean(EXTRA_SUCCESS, true)
+                putString(EXTRA_MESSAGE, "Tunnel is already stopped.")
+            })
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelfResult(startId)
+            return
+        }
+
+        stopRequested = true
+        val accepted = tunnelRunner.stop()
+        receiver?.send(
+            if (accepted) RESULT_STOPPING else RESULT_FAILED,
+            Bundle().apply {
+                putBoolean(EXTRA_SUCCESS, accepted)
+                putString(
+                    EXTRA_MESSAGE,
+                    if (accepted) "Tunnel stop requested. Waiting for native cleanup."
+                    else "The native engine did not accept the stop request."
+                )
+            }
+        )
+    }
+
+    private fun onNativeTunnelFinished(result: Int) {
+        val receiver = activeReceiver
+        val wasRequestedStop = stopRequested
+        activeReceiver = null
+        stopRequested = false
+
+        if (destroyed) unbindNativeBridge()
+
+        mainHandler.post {
+            if (!destroyed) {
+                val message = when {
+                    result == 0 && wasRequestedStop -> "Tunnel stopped and native resources released."
+                    result == 0 -> "Tunnel engine exited."
+                    else -> "Native tunnel stopped with error code $result."
+                }
+                receiver?.send(
+                    if (result == 0) RESULT_STOPPED else RESULT_FAILED,
+                    Bundle().apply {
+                        putBoolean(EXTRA_SUCCESS, result == 0)
+                        putString(EXTRA_MESSAGE, message)
+                    }
+                )
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelfResult(activeStartId)
+            }
+        }
+    }
+
+    private fun failStart(receiver: ResultReceiver?, startId: Int, message: String) {
+        receiver?.send(RESULT_FAILED, Bundle().apply {
+            putBoolean(EXTRA_SUCCESS, false)
+            putString(EXTRA_MESSAGE, message)
+        })
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelfResult(startId)
+    }
+
+    private fun establishTunInterface(): ParcelFileDescriptor? {
+        return Builder()
+            .setSession("AboEzzat VPN")
+            .setMtu(TUN_MTU)
+            .addAddress(InetAddress.getByName(IPV4_TUN_ADDRESS), 32)
+            .addRoute(InetAddress.getByName("0.0.0.0"), 0)
+            .addDnsServer(InetAddress.getByName(IPV4_DNS_ADDRESS))
+            .addAddress(InetAddress.getByName(IPV6_TUN_ADDRESS), 128)
+            .addRoute(InetAddress.getByName("::"), 0)
+            .addDnsServer(InetAddress.getByName(IPV6_DNS_ADDRESS))
+            .setBlocking(false)
+            .establish()
+    }
+
+    private fun resolveProxyHost(host: String): String? {
+        val normalized = host.removePrefix("[").removeSuffix("]")
+        if (normalized.contains(':') || normalized.matches(Regex("[0-9.]+"))) {
+            return normalized
+        }
+
+        return try {
+            val connectivity = getSystemService(ConnectivityManager::class.java)
+            val network = connectivity.activeNetwork
+            val addresses = if (network != null) {
+                network.getAllByName(normalized)
+            } else {
+                InetAddress.getAllByName(normalized)
+            }
+            addresses.firstOrNull { it is Inet4Address }?.hostAddress
+                ?: addresses.firstOrNull()?.hostAddress?.substringBefore('%')
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseProfile(intent: Intent): ProxyProfile? =
+        ProxyTestRequestParser.parse(
+            name = intent.getStringExtra(EXTRA_NAME),
+            host = intent.getStringExtra(EXTRA_HOST),
+            port = intent.getIntExtra(EXTRA_PORT, 0),
+            protocol = intent.getStringExtra(EXTRA_PROTOCOL),
+            username = intent.getStringExtra(EXTRA_USERNAME),
+            password = intent.getStringExtra(EXTRA_PASSWORD),
+            remoteDns = intent.getBooleanExtra(EXTRA_REMOTE_DNS, true)
+        )
+
+    private fun startTunnelForeground() {
+        val manager = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(
+                NotificationChannel(
+                    NOTIFICATION_CHANNEL,
+                    "AboEzzat VPN",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Shows the active VPN tunnel state."
+                }
+            )
+        }
+        val notification = Notification.Builder(this, NOTIFICATION_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle("AboEzzat VPN")
+            .setContentText("Starting the upstream proxy tunnel")
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    @Synchronized
+    private fun unbindNativeBridge() {
+        if (!nativeBridgeBound) return
+        try {
+            NativeSocketProtectorBridge.nativeUnbindService()
+        } catch (_: UnsatisfiedLinkError) {
+            // A missing native library must not block service teardown.
+        }
+        nativeBridgeBound = false
+    }
+
+    override fun onRevoke() {
+        if (::tunnelRunner.isInitialized && tunnelRunner.isActive()) {
+            stopRequested = true
+            tunnelRunner.stop()
+        }
+        super.onRevoke()
     }
 
     override fun onDestroy() {
+        destroyed = true
         testExecutor.shutdownNow()
-        if (nativeBridgeBound) {
-            try {
-                NativeSocketProtectorBridge.nativeUnbindService()
-            } catch (_: UnsatisfiedLinkError) {
-                // A missing native library must never block service teardown.
-            }
-            nativeBridgeBound = false
+        if (::tunnelRunner.isInitialized && tunnelRunner.isActive()) {
+            stopRequested = true
+            tunnelRunner.stop()
+            engineExecutor.shutdown()
+            // The native global reference is released by onNativeTunnelFinished
+            // after the native call returns and the TUN descriptor is closed.
+        } else {
+            engineExecutor.shutdown()
+            unbindNativeBridge()
         }
         super.onDestroy()
     }
 
-    /**
-     * Protects an outbound socket before connect() so it does not re-enter
-     * this app's TUN interface once a real VPN tunnel is active.
-     */
+    /** Protect an outbound Java socket before connect(). */
     fun protectUpstreamSocket(socket: Socket): Boolean = protect(socket)
 
-    /**
-     * Stable synchronous entry point for the future app-owned JNI callback.
-     * Native code must call this before connect/bind/send and treat false as
-     * a hard failure. This method does not create or start a VPN tunnel.
-     */
+    /** Synchronous JNI callback. False is a hard failure for native callers. */
     @androidx.annotation.Keep
     fun protectNativeSocket(fd: Int): Boolean =
         NativeSocketProtection.protect(fd, ::protect)
 
     companion object {
         const val ACTION_TEST_UPSTREAM_PROXY = "com.aboezzat.vpn.action.TEST_UPSTREAM_PROXY"
+        const val ACTION_START_TUNNEL = "com.aboezzat.vpn.action.START_TUNNEL"
+        const val ACTION_STOP_TUNNEL = "com.aboezzat.vpn.action.STOP_TUNNEL"
+
         const val EXTRA_RESULT_RECEIVER = "result_receiver"
         const val EXTRA_NAME = "profile_name"
         const val EXTRA_HOST = "profile_host"
@@ -133,7 +396,19 @@ class AboEzzatVpnService : VpnService() {
         const val EXTRA_SUCCESS = "success"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_LATENCY = "latency_ms"
+
         const val RESULT_OK = 1
         const val RESULT_FAILED = 0
+        const val RESULT_STARTED = 2
+        const val RESULT_STOPPING = 3
+        const val RESULT_STOPPED = 4
+
+        private const val TUN_MTU = 1500
+        private const val IPV4_TUN_ADDRESS = "10.77.0.2"
+        private const val IPV4_DNS_ADDRESS = "10.77.0.1"
+        private const val IPV6_TUN_ADDRESS = "fd77:ab0e::2"
+        private const val IPV6_DNS_ADDRESS = "fd77:ab0e::1"
+        private const val NOTIFICATION_CHANNEL = "aboezzat_vpn_tunnel"
+        private const val NOTIFICATION_ID = 7301
     }
 }
