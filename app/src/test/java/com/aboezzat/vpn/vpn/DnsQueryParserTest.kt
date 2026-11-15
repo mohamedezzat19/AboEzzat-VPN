@@ -44,7 +44,7 @@ class DnsQueryParserTest {
         add(0x12); add(0x34)
         add(0x01); add(if (rd) 0x00 else 0x00)
         add(0x00); add(0x01) // QDCOUNT
-        repeat(3) { add(0) } // ANCOUNT, NSCOUNT, high ARCOUNT
+        repeat(6) { add(0) } // ANCOUNT, NSCOUNT, ARCOUNT
         add(0)
         name.split(".").forEach { label ->
             add(label.length)
