@@ -281,9 +281,15 @@ private fun Dashboard(store: ProxyProfileStore) {
                         ) {
                             Text(if (testing[profile.name] == true) "Testing connection…" else "Test connection")
                         }
+                        Text(
+                            "This checks the proxy handshake only; it does not route traffic through the VPN.",
+                            color = Muted,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp
+                        )
                         testResults[profile.name]?.let { result ->
                             Text(
-                                (if (result.success) "CONNECTED" else "FAILED") +
+                                (if (result.success) "HANDSHAKE OK" else "FAILED") +
                                     " · " + result.message +
                                     if (result.success) " · ${result.latencyMs} ms" else "",
                                 color = if (result.success) Accent else Color(0xFFFF8B8B),
