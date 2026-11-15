@@ -18,7 +18,7 @@ pub use socks5_impl::UserKey;
 #[cfg(feature = "udpgw")]
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::{
-    io::{Error, ErrorKind},
+    io::ErrorKind,
     net::{IpAddr, SocketAddr},
     os::fd::AsRawFd,
     sync::Arc,
@@ -292,7 +292,7 @@ fn ensure_socket_protected_with(
     protect: impl FnOnce(i32) -> bool,
 ) -> std::io::Result<()> {
     if fd < 0 || !protect(fd) {
-        return Err(Error::new(ErrorKind::PermissionDenied, "Android VPN socket protection failed"));
+        return Err(std::io::Error::new(ErrorKind::PermissionDenied, "Android VPN socket protection failed"));
     }
     Ok(())
 }
