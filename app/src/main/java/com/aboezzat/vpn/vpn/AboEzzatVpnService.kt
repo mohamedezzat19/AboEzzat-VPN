@@ -17,6 +17,8 @@ import com.aboezzat.vpn.proxy.ProxyConnectionTester
 import com.aboezzat.vpn.proxy.ProxyTestRequestParser
 import com.aboezzat.vpn.proxy.ProxyProfile
 import com.aboezzat.vpn.proxy.Socks5UdpAssociateTester
+import com.aboezzat.vpn.data.AppRouteStore
+import com.aboezzat.vpn.core.RouteMode
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.Socket
@@ -44,6 +46,7 @@ class AboEzzatVpnService : VpnService() {
     @Volatile private var activeReceiver: ResultReceiver? = null
 
     private lateinit var tunnelRunner: NativeTunnelRunner
+    @Volatile private var directBypassCount = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -264,10 +267,11 @@ class AboEzzatVpnService : VpnService() {
             RESULT_STARTED,
             Bundle().apply {
                 putBoolean(EXTRA_SUCCESS, true)
-                putString(EXTRA_MESSAGE, "Tunnel worker started. Upstream traffic will use ${profile.name}.")
+                putInt(EXTRA_DIRECT_BYPASS_COUNT, directBypassCount)
+                putString(EXTRA_MESSAGE, "Tunnel worker started via ${profile.name}. Direct bypass active for $directBypassCount app(s); other saved route modes are not separately enforced yet.")
             }
         )
-        updateTunnelNotification("Tunnel active via ${profile.name}")
+        updateTunnelNotification("Tunnel active via ${profile.name} · $directBypassCount direct bypass")
     }
 
     private fun stopTunnel(intent: Intent, startId: Int) {
@@ -338,7 +342,18 @@ class AboEzzatVpnService : VpnService() {
     }
 
     private fun establishTunInterface(): ParcelFileDescriptor? {
-        return Builder()
+        val routes = AppRouteStore(this).load()
+        val directCandidates = routes.filterValues { it == RouteMode.DIRECT }.keys
+        val safeDirectPackages = directCandidates.filter { candidatePackage ->
+            if (candidatePackage == packageName) return@filter false
+            runCatching {
+                val uid = packageManager.getApplicationInfo(candidatePackage, 0).uid
+                val uidPackages = packageManager.getPackagesForUid(uid)?.toList().orEmpty()
+                uidPackages.isNotEmpty() && uidPackages.all { routes[it] == RouteMode.DIRECT }
+            }.getOrDefault(false)
+        }
+
+        val builder = Builder()
             .setSession("AboEzzat VPN")
             .setMtu(TUN_MTU)
             .addAddress(InetAddress.getByName(IPV4_TUN_ADDRESS), 32)
@@ -348,7 +363,16 @@ class AboEzzatVpnService : VpnService() {
             .addRoute(InetAddress.getByName("::"), 0)
             .addDnsServer(InetAddress.getByName(IPV6_DNS_ADDRESS))
             .setBlocking(false)
-            .establish()
+
+        var applied = 0
+        safeDirectPackages.forEach { candidatePackage ->
+            runCatching {
+                builder.addDisallowedApplication(candidatePackage)
+                applied++
+            }
+        }
+        directBypassCount = applied
+        return builder.establish()
     }
 
     private fun resolveProxyHost(host: String): String? {
@@ -505,6 +529,7 @@ class AboEzzatVpnService : VpnService() {
         const val EXTRA_RX_BYTES = "rx_bytes"
         const val EXTRA_UDP_RELAY_ADDRESS = "udp_relay_address"
         const val EXTRA_UDP_RELAY_PORT = "udp_relay_port"
+        const val EXTRA_DIRECT_BYPASS_COUNT = "direct_bypass_count"
 
         const val RESULT_OK = 1
         const val RESULT_FAILED = 0
