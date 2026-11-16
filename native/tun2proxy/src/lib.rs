@@ -681,35 +681,48 @@ async fn handle_tcp_session(
 
     let mut server = create_tcp_stream(&socket_queue, server_addr).await?;
 
-    log::info!("Beginning {session_info}");
+    log::info!("TCP flow {session_info}: opening upstream proxy socket to {server_addr}");
 
-    if let Err(e) = handle_proxy_session(&mut server, proxy_handler).await {
+    if let Err(error) = handle_proxy_session(&mut server, proxy_handler).await {
+        log::warn!("TCP flow {session_info}: upstream proxy CONNECT failed: {error}");
         tcp_stack.shutdown().await?;
-        return Err(e);
+        return Err(error);
     }
+    log::info!("TCP flow {session_info}: upstream proxy CONNECT established; starting bidirectional relay");
 
     let (mut t_rx, mut t_tx) = tokio::io::split(tcp_stack);
     let (mut s_rx, mut s_tx) = tokio::io::split(server);
 
-    let res = tokio::join!(
+    let (client_to_proxy, proxy_to_client) = tokio::join!(
         async move {
-            let r = copy_and_record_traffic(&mut t_rx, &mut s_tx, true).await;
-            if let Err(err) = s_tx.shutdown().await {
-                log::trace!("{session_info} s_tx shutdown error {err}");
+            let result = copy_and_record_traffic(&mut t_rx, &mut s_tx, true).await;
+            if let Err(error) = s_tx.shutdown().await {
+                log::debug!("TCP flow {session_info}: client-to-proxy half-close: {error}");
             }
-            r
+            result
         },
         async move {
-            let r = copy_and_record_traffic(&mut s_rx, &mut t_tx, false).await;
-            if let Err(err) = t_tx.shutdown().await {
-                log::trace!("{session_info} t_tx shutdown error {err}");
+            let result = copy_and_record_traffic(&mut s_rx, &mut t_tx, false).await;
+            if let Err(error) = t_tx.shutdown().await {
+                log::debug!("TCP flow {session_info}: proxy-to-client half-close: {error}");
             }
-            r
+            result
         },
     );
-    log::info!("Ending {session_info} with {res:?}");
 
-    Ok(())
+    match &client_to_proxy {
+        Ok(bytes) => log::info!("TCP flow {session_info}: client -> proxy finished ({bytes} bytes)"),
+        Err(error) => log::warn!("TCP flow {session_info}: client -> proxy relay failed: {error}"),
+    }
+    match &proxy_to_client {
+        Ok(bytes) => log::info!("TCP flow {session_info}: proxy -> client finished ({bytes} bytes)"),
+        Err(error) => log::warn!("TCP flow {session_info}: proxy -> client relay failed: {error}"),
+    }
+
+    match (client_to_proxy, proxy_to_client) {
+        (Ok(_), Ok(_)) => Ok(()),
+        (Err(error), _) | (_, Err(error)) => Err(error.into()),
+    }
 }
 
 #[cfg(feature = "udpgw")]
