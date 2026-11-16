@@ -25,6 +25,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -60,6 +63,11 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -181,6 +189,10 @@ private fun Dashboard(store: ProxyProfileStore) {
     var proxyConnected by remember { mutableStateOf(false) }
     var proxyTesting by remember { mutableStateOf(false) }
     var proxyStatus by remember { mutableStateOf("Not tested") }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val pageScrollState = rememberScrollState()
+    val updateSectionRequester = remember { BringIntoViewRequester() }
+    val profilesSectionRequester = remember { BringIntoViewRequester() }
 
     var updateInfo by remember { mutableStateOf<AppUpdateInfo?>(null) }
     var updateChecking by remember { mutableStateOf(true) }
@@ -392,14 +404,44 @@ private fun Dashboard(store: ProxyProfileStore) {
         sendTunnelCommand(AboEzzatVpnService.ACTION_START_TUNNEL, profile)
     }
 
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(drawerContainerColor = Panel, drawerContentColor = Color.White) {
+                Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("ABOEZZAT VPN", color = Accent, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(tx("Proxy control center"), color = Muted, fontSize = 11.sp)
+                    Divider(color = Color(0xFF26344D))
+                    NavigationDrawerItem(label = { Text(tx("Home")) }, selected = true, onClick = {
+                        updateScope.launch { drawerState.close(); pageScrollState.animateScrollTo(0) }
+                    })
+                    NavigationDrawerItem(label = { Text(tx("Proxy profiles")) }, selected = false, onClick = {
+                        updateScope.launch { drawerState.close(); profilesSectionRequester.bringIntoView() }
+                    })
+                    NavigationDrawerItem(label = { Text(tx("Installed apps")) }, selected = false, onClick = {
+                        updateScope.launch { drawerState.close(); showAppsPage = true }
+                    })
+                    NavigationDrawerItem(label = { Text(tx("App updates")) }, selected = false, onClick = {
+                        updateScope.launch { drawerState.close(); updateSectionRequester.bringIntoView() }
+                    })
+                    Divider(color = Color(0xFF26344D))
+                    Text(tx("Connection diagnostics"), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                    Text(tx("TCP proxy handshake status is shown in each profile. UDP and per-app routing support depend on the upstream server and are not assumed."), color = Muted, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+        }
+    ) {
     Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
         Column(
             modifier = Modifier.fillMaxSize().background(Midnight)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(pageScrollState)
                 .padding(horizontal = 20.dp, vertical = 26.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { updateScope.launch { drawerState.open() } }) {
+                    Text("☰", color = Accent, fontSize = 25.sp)
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text("ABOEZZAT", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                     Text("VPN", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
@@ -496,7 +538,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             }
 
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().bringIntoViewRequester(updateSectionRequester),
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Panel)
             ) {
@@ -571,7 +613,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.bringIntoViewRequester(profilesSectionRequester), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(tx("PROXY PROFILES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text(tx("Save the first phone's proxy connection details"), color = Muted, fontSize = 11.sp)
@@ -748,6 +790,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             Text(tx("ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL"), color = Muted, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         }
     }
+    }
 
     if (showAppsPage) {
         Dialog(
@@ -920,7 +963,7 @@ private fun formatUpdateBytes(bytes: Long): String {
 }
 
 private val arabicUi = mapOf(
-    "APP UPDATES" to "تحديثات التطبيق",
+    "Proxy control center" to "مركز التحكم بالبروكسي",\n    "Home" to "الرئيسية",\n    "Proxy profiles" to "ملفات البروكسي",\n    "Installed apps" to "التطبيقات المثبتة",\n    "App updates" to "تحديثات التطبيق",\n    "Connection diagnostics" to "تشخيص الاتصال",\n    "TCP proxy handshake status is shown in each profile. UDP and per-app routing support depend on the upstream server and are not assumed." to "تظهر نتيجة مصافحة TCP في كل ملف بروكسي. دعم UDP وتوجيه التطبيقات يعتمدان على الخادم ولا نفترض توفرهما.",\n    "APP UPDATES" to "تحديثات التطبيق",
     "Checking GitHub Releases…" to "جارٍ البحث عن تحديث على GitHub…",
     "Downloading update…" to "جارٍ تنزيل التحديث…",
     "Update downloaded and ready to install" to "تم تنزيل التحديث وأصبح جاهزًا للتثبيت",
