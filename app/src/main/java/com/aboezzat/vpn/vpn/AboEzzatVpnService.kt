@@ -106,11 +106,6 @@ class AboEzzatVpnService : VpnService() {
                             ::protectUpstreamSocket
                         } else {
                             null
-                        },
-                        protectDatagramSocket = if (::tunnelRunner.isInitialized && tunnelRunner.isActive()) {
-                            ::protectUpstreamDatagramSocket
-                        } else {
-                            null
                         }
                     )
                 }
