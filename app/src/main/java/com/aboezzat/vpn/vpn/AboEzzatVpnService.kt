@@ -22,6 +22,7 @@ import com.aboezzat.vpn.core.RouteMode
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.Socket
+import java.net.DatagramSocket
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -103,6 +104,11 @@ class AboEzzatVpnService : VpnService() {
                         profile,
                         protectSocket = if (::tunnelRunner.isInitialized && tunnelRunner.isActive()) {
                             ::protectUpstreamSocket
+                        } else {
+                            null
+                        },
+                        protectDatagramSocket = if (::tunnelRunner.isInitialized && tunnelRunner.isActive()) {
+                            ::protectUpstreamDatagramSocket
                         } else {
                             null
                         }
@@ -497,8 +503,10 @@ class AboEzzatVpnService : VpnService() {
         )
     }
 
-    /** Protect an outbound Java socket before connect(). */
+    /** Protect outbound diagnostic sockets before connect/send. */
     fun protectUpstreamSocket(socket: Socket): Boolean = protect(socket)
+
+    fun protectUpstreamDatagramSocket(socket: DatagramSocket): Boolean = protect(socket)
 
     /** Synchronous JNI callback. False is a hard failure for native callers. */
     @androidx.annotation.Keep
