@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <android/log.h>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -15,6 +16,8 @@ using Tun2ProxyTrafficCallback = void (*)(const Tun2ProxyTrafficStatus*, void*);
 extern "C" void tun2proxy_set_traffic_status_callback(uint32_t, Tun2ProxyTrafficCallback, void*);
 
 namespace {
+constexpr const char* kLogTag = "AboEzzatSocketProtect";
+#define PROTECT_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, kLogTag, __VA_ARGS__)
 JavaVM* g_vm = nullptr;
 std::mutex g_mutex;
 std::condition_variable g_idle;
@@ -29,13 +32,22 @@ bool g_engine_pending_start = false;
 bool g_engine_stop_requested = false;
 
 bool protect_fd(JNIEnv* env, jobject service, jmethodID method, int fd) {
-    if (fd < 0 || service == nullptr || method == nullptr) return false;
+    if (fd < 0 || service == nullptr || method == nullptr) {
+        PROTECT_LOGE("protect callback unavailable: fd=%d service=%p method=%p", fd, service, method);
+        return false;
+    }
     const jboolean allowed = env->CallBooleanMethod(service, method, static_cast<jint>(fd));
     if (env->ExceptionCheck()) {
+        PROTECT_LOGE("Java protectNativeSocket threw for fd=%d", fd);
+        env->ExceptionDescribe();
         env->ExceptionClear();
         return false;
     }
-    return allowed == JNI_TRUE;
+    if (allowed != JNI_TRUE) {
+        PROTECT_LOGE("VpnService.protect returned false for fd=%d", fd);
+        return false;
+    }
+    return true;
 }
 
 void on_native_traffic_status(const Tun2ProxyTrafficStatus* status, void*) {
@@ -57,6 +69,8 @@ void on_native_traffic_status(const Tun2ProxyTrafficStatus* status, void*) {
     if (get_env == JNI_EDETACHED) {
         if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
             attached_here = true;
+        } else {
+            PROTECT_LOGE("AttachCurrentThread failed for fd=%d", fd);
         }
     } else if (get_env != JNI_OK) {
         env = nullptr;
@@ -76,13 +90,14 @@ void on_native_traffic_status(const Tun2ProxyTrafficStatus* status, void*) {
 }
 
 bool protect_fd_from_native(int fd) {
-    if (fd < 0 || g_vm == nullptr) return false;
+    if (fd < 0 || g_vm == nullptr) { PROTECT_LOGE("invalid fd or JavaVM: fd=%d vm=%p", fd, g_vm); return false; }
 
     jobject service = nullptr;
     jmethodID method = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_shutting_down || g_service == nullptr || g_protect_method == nullptr) {
+            PROTECT_LOGE("service callback not bound: fd=%d shutting_down=%d service=%p method=%p", fd, g_shutting_down, g_service, g_protect_method);
             return false;
         }
         ++g_in_flight;
@@ -99,11 +114,14 @@ bool protect_fd_from_native(int fd) {
             attached_here = true;
         }
     } else if (get_env != JNI_OK) {
+        PROTECT_LOGE("GetEnv failed (%d) for fd=%d", get_env, fd);
         env = nullptr;
     }
 
     if (env != nullptr) {
         allowed = protect_fd(env, service, method, fd);
+    } else {
+        PROTECT_LOGE("JNIEnv unavailable for fd=%d", fd);
     }
 
     if (attached_here) {
