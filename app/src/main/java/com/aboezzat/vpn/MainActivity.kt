@@ -932,7 +932,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         )
                         InfoCard(
                             "Routing engine status",
-                            "These choices are saved on this phone, but per-app traffic enforcement is not active yet. The current tunnel still routes the whole device through the selected upstream proxy."
+                            "Direct bypass is now applied when the tunnel starts. Apps sharing an Android UID are bypassed only when every package under that UID is set to Direct. Proxy only remains the default route; VPN only and Proxy + VPN are saved choices but are not separate routes yet. Reconnect after changing app routes."
                         )
                         InfoCard(
                             "Banking mode · manual policy",
@@ -1073,7 +1073,7 @@ private val arabicUi = mapOf(
     "Uses the VPN route without the upstream proxy" to "يستخدم مسار VPN دون البروكسي الأساسي",
     "No apps in this group" to "لا توجد تطبيقات في هذه المجموعة",
     "Routing engine status" to "حالة محرك التوجيه",
-    "These choices are saved on this phone, but per-app traffic enforcement is not active yet. The current tunnel still routes the whole device through the selected upstream proxy." to "يتم حفظ هذه الاختيارات على الهاتف، لكن توجيه حركة كل تطبيق على حدة غير مفعّل بعد. النفق الحالي يمرر حركة الجهاز بالكامل عبر البروكسي المحدد.",
+    "Direct bypass is now applied when the tunnel starts. Apps sharing an Android UID are bypassed only when every package under that UID is set to Direct. Proxy only remains the default route; VPN only and Proxy + VPN are saved choices but are not separate routes yet. Reconnect after changing app routes." to "يتم تطبيق التجاوز المباشر عند بدء النفق. إذا كانت تطبيقات تشترك في UID واحد فلن يتم تجاوزها إلا عند ضبط جميع الحزم التابعة له على اتصال مباشر. يظل البروكسي فقط هو المسار الافتراضي؛ أما VPN فقط والبروكسي مع VPN فهي اختيارات محفوظة وليست مسارات مستقلة حتى الآن. أعد الاتصال بعد تغيير مسارات التطبيقات.",
     "CONNECTION STATUS" to "حالة الاتصال",
     "Not connected" to "غير متصل",
     "Tunnel active" to "النفق نشط",
