@@ -963,7 +963,8 @@ private fun formatUpdateBytes(bytes: Long): String {
 }
 
 private val arabicUi = mapOf(
-    "Proxy control center" to "مركز التحكم بالبروكسي",\n    "Home" to "الرئيسية",\n    "Proxy profiles" to "ملفات البروكسي",\n    "Installed apps" to "التطبيقات المثبتة",\n    "App updates" to "تحديثات التطبيق",\n    "Connection diagnostics" to "تشخيص الاتصال",\n    "TCP proxy handshake status is shown in each profile. UDP and per-app routing support depend on the upstream server and are not assumed." to "تظهر نتيجة مصافحة TCP في كل ملف بروكسي. دعم UDP وتوجيه التطبيقات يعتمدان على الخادم ولا نفترض توفرهما.",\n    "APP UPDATES" to "تحديثات التطبيق",
+    "Proxy control center" to "مركز التحكم بالبروكسي",
+    "Home" to "الرئيسية",\n    "Proxy profiles" to "ملفات البروكسي",\n    "Installed apps" to "التطبيقات المثبتة",\n    "App updates" to "تحديثات التطبيق",\n    "Connection diagnostics" to "تشخيص الاتصال",\n    "TCP proxy handshake status is shown in each profile. UDP and per-app routing support depend on the upstream server and are not assumed." to "تظهر نتيجة مصافحة TCP في كل ملف بروكسي. دعم UDP وتوجيه التطبيقات يعتمدان على الخادم ولا نفترض توفرهما.",\n    "APP UPDATES" to "تحديثات التطبيق",
     "Checking GitHub Releases…" to "جارٍ البحث عن تحديث على GitHub…",
     "Downloading update…" to "جارٍ تنزيل التحديث…",
     "Update downloaded and ready to install" to "تم تنزيل التحديث وأصبح جاهزًا للتثبيت",
