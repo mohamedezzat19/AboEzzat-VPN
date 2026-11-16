@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.ResultReceiver
+import android.util.Log
 import com.aboezzat.vpn.proxy.ProxyConnectionTester
 import com.aboezzat.vpn.proxy.ProxyTestRequestParser
 import com.aboezzat.vpn.proxy.ProxyProfile
@@ -504,9 +505,32 @@ class AboEzzatVpnService : VpnService() {
     }
 
     /** Protect outbound diagnostic sockets before connect/send. */
-    fun protectUpstreamSocket(socket: Socket): Boolean = protect(socket)
+    fun protectUpstreamSocket(socket: Socket): Boolean {
+        val allowed = protect(socket)
+        if (!allowed) {
+            Log.e(
+                SOCKET_PROTECT_LOG_TAG,
+                "VpnService.protect(Socket) returned false: closed=${socket.isClosed}, " +
+                    "connected=${socket.isConnected}, bound=${socket.isBound}, " +
+                    "localPort=${runCatching { socket.localPort }.getOrDefault(-1)}, " +
+                    "thread=${Thread.currentThread().name}"
+            )
+        }
+        return allowed
+    }
 
-    fun protectUpstreamDatagramSocket(socket: DatagramSocket): Boolean = protect(socket) // Keep diagnostic UDP outside the TUN
+    fun protectUpstreamDatagramSocket(socket: DatagramSocket): Boolean {
+        val allowed = protect(socket)
+        if (!allowed) {
+            Log.e(
+                SOCKET_PROTECT_LOG_TAG,
+                "VpnService.protect(DatagramSocket) returned false: closed=${socket.isClosed}, " +
+                    "bound=${socket.isBound}, localPort=${socket.localPort}, " +
+                    "thread=${Thread.currentThread().name}"
+            )
+        }
+        return allowed
+    }
 
     /** Synchronous JNI callback. False is a hard failure for native callers. */
     @androidx.annotation.Keep
@@ -514,6 +538,7 @@ class AboEzzatVpnService : VpnService() {
         NativeSocketProtection.protect(fd, ::protect)
 
     companion object {
+        private const val SOCKET_PROTECT_LOG_TAG = "AboEzzatSocketProtect"
         @Volatile private var tunnelRunning = false
         fun isTunnelRunning(): Boolean = tunnelRunning
 
