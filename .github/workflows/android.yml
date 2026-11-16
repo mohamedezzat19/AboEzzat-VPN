@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: abo-vpn-release-${{ github.ref }}
@@ -97,11 +97,14 @@ jobs:
           "$BUILD_TOOLS/apksigner" sign --ks-type PKCS12 --ks "$RUNNER_TEMP/aboezzat-release.p12" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD --out "$SIGNED" "$ALIGNED"
           "$BUILD_TOOLS/apksigner" verify --verbose "$SIGNED"
 
+      - name: Name signed Release APK
+        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/AboEzzat-VPN.apk
+
       - name: Upload signed Release APK
         uses: actions/upload-artifact@v4
         with:
           name: AboEzzat-VPN-Release
-          path: app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/release/AboEzzat-VPN.apk
           if-no-files-found: error
 
       - name: Publish GitHub Release for in-app updates
