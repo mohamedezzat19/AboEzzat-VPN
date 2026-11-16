@@ -25,7 +25,7 @@ class Socks5UdpAssociateTesterTest {
                     listOf(5, 3, 0, 1, 0, 0, 0, 0, 0, 0),
                     readExactly(input, 10).map { it.toInt() and 0xff }
                 )
-                output.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, 0x13, 0x89))
+                output.write(byteArrayOf(5, 0, 0, 1, 127.toByte(), 0, 0, 1, 0x13, 0x89.toByte()))
                 output.flush()
             }
         }
