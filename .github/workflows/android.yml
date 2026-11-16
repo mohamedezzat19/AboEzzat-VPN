@@ -78,8 +78,9 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aboezzat-release.jks"
           test -s "$RUNNER_TEMP/aboezzat-release.jks"
           echo "Decoded keystore size: $(wc -c < "$RUNNER_TEMP/aboezzat-release.jks") bytes"
-          keytool -list -keystore "$RUNNER_TEMP/aboezzat-release.jks" -storetype JKS -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
-          echo "JKS format, password, and alias validated."
+          echo "Keystore header (first 4 bytes): $(od -An -tx1 -N4 "$RUNNER_TEMP/aboezzat-release.jks" | tr -d ' \n')"
+          keytool -list -keystore "$RUNNER_TEMP/aboezzat-release.jks" -storetype JKS -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS"
+          echo "Keystore format, password, and alias validated."
 
       - name: Align and sign Release APK
         env:
