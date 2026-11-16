@@ -16,6 +16,7 @@ import android.os.ResultReceiver
 import com.aboezzat.vpn.proxy.ProxyConnectionTester
 import com.aboezzat.vpn.proxy.ProxyTestRequestParser
 import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.Socks5UdpAssociateTester
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.Socket
@@ -65,6 +66,10 @@ class AboEzzatVpnService : VpnService() {
         return when (intent?.action) {
             ACTION_TEST_UPSTREAM_PROXY -> {
                 runProxyTest(intent, startId)
+                START_NOT_STICKY
+            }
+            ACTION_TEST_UPSTREAM_UDP -> {
+                runUdpProxyTest(intent, startId)
                 START_NOT_STICKY
             }
             ACTION_START_TUNNEL -> {
@@ -120,6 +125,43 @@ class AboEzzatVpnService : VpnService() {
                         putLong(EXTRA_LATENCY, 0L)
                     }
                 )
+            } finally {
+                if (!tunnelRunner.isActive()) stopSelfResult(startId)
+            }
+        }
+    }
+
+    private fun runUdpProxyTest(intent: Intent, startId: Int) {
+        val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
+        val profile = parseProfile(intent)
+        testExecutor.execute {
+            try {
+                val result = if (profile == null) {
+                    com.aboezzat.vpn.proxy.ProxyUdpTestResult(false, "Invalid proxy profile.")
+                } else {
+                    Socks5UdpAssociateTester.test(
+                        profile,
+                        protectSocket = if (::tunnelRunner.isInitialized && tunnelRunner.isActive()) {
+                            ::protectUpstreamSocket
+                        } else {
+                            null
+                        }
+                    )
+                }
+                receiver?.send(
+                    if (result.supported) RESULT_OK else RESULT_FAILED,
+                    Bundle().apply {
+                        putBoolean(EXTRA_SUCCESS, result.supported)
+                        putString(EXTRA_MESSAGE, result.message)
+                        putString(EXTRA_UDP_RELAY_ADDRESS, result.relayAddress)
+                        putInt(EXTRA_UDP_RELAY_PORT, result.relayPort ?: 0)
+                    }
+                )
+            } catch (error: Exception) {
+                receiver?.send(RESULT_FAILED, Bundle().apply {
+                    putBoolean(EXTRA_SUCCESS, false)
+                    putString(EXTRA_MESSAGE, error.message ?: "UDP diagnostic failed.")
+                })
             } finally {
                 if (!tunnelRunner.isActive()) stopSelfResult(startId)
             }
@@ -444,6 +486,7 @@ class AboEzzatVpnService : VpnService() {
         fun isTunnelRunning(): Boolean = tunnelRunning
 
         const val ACTION_TEST_UPSTREAM_PROXY = "com.aboezzat.vpn.action.TEST_UPSTREAM_PROXY"
+        const val ACTION_TEST_UPSTREAM_UDP = "com.aboezzat.vpn.action.TEST_UPSTREAM_UDP"
         const val ACTION_START_TUNNEL = "com.aboezzat.vpn.action.START_TUNNEL"
         const val ACTION_STOP_TUNNEL = "com.aboezzat.vpn.action.STOP_TUNNEL"
 
@@ -460,6 +503,8 @@ class AboEzzatVpnService : VpnService() {
         const val EXTRA_LATENCY = "latency_ms"
         const val EXTRA_TX_BYTES = "tx_bytes"
         const val EXTRA_RX_BYTES = "rx_bytes"
+        const val EXTRA_UDP_RELAY_ADDRESS = "udp_relay_address"
+        const val EXTRA_UDP_RELAY_PORT = "udp_relay_port"
 
         const val RESULT_OK = 1
         const val RESULT_FAILED = 0
