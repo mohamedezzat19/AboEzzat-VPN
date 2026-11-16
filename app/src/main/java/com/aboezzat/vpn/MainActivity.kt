@@ -26,8 +26,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +50,8 @@ import androidx.compose.material.icons.rounded.SettingsEthernet
 import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -192,8 +192,8 @@ private fun Dashboard(store: ProxyProfileStore) {
     var proxyStatus by remember { mutableStateOf("Not tested") }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val pageScrollState = rememberScrollState()
-    val updateSectionRequester = remember { BringIntoViewRequester() }
-    val profilesSectionRequester = remember { BringIntoViewRequester() }
+    var updateSectionOffset by remember { mutableIntStateOf(0) }
+    var profilesSectionOffset by remember { mutableIntStateOf(0) }
 
     var updateInfo by remember { mutableStateOf<AppUpdateInfo?>(null) }
     var updateChecking by remember { mutableStateOf(true) }
@@ -417,13 +417,13 @@ private fun Dashboard(store: ProxyProfileStore) {
                         updateScope.launch { drawerState.close(); pageScrollState.animateScrollTo(0) }
                     })
                     NavigationDrawerItem(label = { Text(tx("Proxy profiles")) }, selected = false, onClick = {
-                        updateScope.launch { drawerState.close(); profilesSectionRequester.bringIntoView() }
+                        updateScope.launch { drawerState.close(); pageScrollState.animateScrollTo(profilesSectionOffset.coerceAtLeast(0)) }
                     })
                     NavigationDrawerItem(label = { Text(tx("Installed apps")) }, selected = false, onClick = {
                         updateScope.launch { drawerState.close(); showAppsPage = true }
                     })
                     NavigationDrawerItem(label = { Text(tx("App updates")) }, selected = false, onClick = {
-                        updateScope.launch { drawerState.close(); updateSectionRequester.bringIntoView() }
+                        updateScope.launch { drawerState.close(); pageScrollState.animateScrollTo(updateSectionOffset.coerceAtLeast(0)) }
                     })
                     Divider(color = Color(0xFF26344D))
                     Text(tx("Connection diagnostics"), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
@@ -539,7 +539,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             }
 
             Card(
-                modifier = Modifier.fillMaxWidth().bringIntoViewRequester(updateSectionRequester),
+                modifier = Modifier.fillMaxWidth().onGloballyPositioned { updateSectionOffset = it.positionInParent().y.toInt() },
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Panel)
             ) {
@@ -614,7 +614,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                 )
             }
 
-            Row(modifier = Modifier.bringIntoViewRequester(profilesSectionRequester), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = Modifier.onGloballyPositioned { profilesSectionOffset = it.positionInParent().y.toInt() }, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(tx("PROXY PROFILES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text(tx("Save the first phone's proxy connection details"), color = Muted, fontSize = 11.sp)
