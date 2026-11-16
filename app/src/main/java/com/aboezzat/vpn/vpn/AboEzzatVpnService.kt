@@ -419,6 +419,18 @@ class AboEzzatVpnService : VpnService() {
         super.onDestroy()
     }
 
+    /** Receive native tunnel byte counters from the Rust engine. */
+    @androidx.annotation.Keep
+    fun onNativeTrafficStatus(txBytes: Long, rxBytes: Long) {
+        activeReceiver?.send(
+            RESULT_TRAFFIC_UPDATE,
+            Bundle().apply {
+                putLong(EXTRA_TX_BYTES, txBytes)
+                putLong(EXTRA_RX_BYTES, rxBytes)
+            }
+        )
+    }
+
     /** Protect an outbound Java socket before connect(). */
     fun protectUpstreamSocket(socket: Socket): Boolean = protect(socket)
 
@@ -446,6 +458,8 @@ class AboEzzatVpnService : VpnService() {
         const val EXTRA_SUCCESS = "success"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_LATENCY = "latency_ms"
+        const val EXTRA_TX_BYTES = "tx_bytes"
+        const val EXTRA_RX_BYTES = "rx_bytes"
 
         const val RESULT_OK = 1
         const val RESULT_FAILED = 0
@@ -454,6 +468,7 @@ class AboEzzatVpnService : VpnService() {
         const val RESULT_STOPPED = 4
         const val RESULT_STOP_FAILED = 5
         const val RESULT_ALREADY_ACTIVE = 6
+        const val RESULT_TRAFFIC_UPDATE = 7
 
         private const val TUN_MTU = 1500
         private const val IPV4_TUN_ADDRESS = "10.77.0.2"
