@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import android.net.VpnService
+import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -16,6 +18,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -55,6 +58,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -71,6 +75,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -93,6 +98,12 @@ import com.aboezzat.vpn.proxy.ProxyProfile
 import com.aboezzat.vpn.proxy.ProxyProtocol
 import com.aboezzat.vpn.vpn.AboEzzatVpnService
 import com.aboezzat.vpn.proxy.ProxyTestResult
+import com.aboezzat.vpn.update.AppUpdateInfo
+import com.aboezzat.vpn.update.GitHubReleaseUpdater
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 private val Midnight = Color(0xFF0A1020)
 private val Panel = Color(0xFF141F33)
@@ -170,6 +181,93 @@ private fun Dashboard(store: ProxyProfileStore) {
     var proxyConnected by remember { mutableStateOf(false) }
     var proxyTesting by remember { mutableStateOf(false) }
     var proxyStatus by remember { mutableStateOf("Not tested") }
+
+    var updateInfo by remember { mutableStateOf<AppUpdateInfo?>(null) }
+    var updateChecking by remember { mutableStateOf(true) }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var updateProgress by remember { mutableStateOf(0f) }
+    var updateDownloadedBytes by remember { mutableStateOf(0L) }
+    var updateTotalBytes by remember { mutableStateOf(0L) }
+    var downloadedApk by remember { mutableStateOf<File?>(null) }
+    var updateError by remember { mutableStateOf("") }
+    val updateScope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        updateChecking = true
+        updateError = ""
+        try {
+            updateInfo = withContext(Dispatchers.IO) {
+                GitHubReleaseUpdater.checkForUpdate(context)
+            }
+        } catch (error: Exception) {
+            updateError = error.message ?: "Could not check for updates."
+        } finally {
+            updateChecking = false
+        }
+    }
+
+    fun checkForAppUpdate() {
+        updateChecking = true
+        updateError = ""
+        updateScope.launch {
+            try {
+                updateInfo = withContext(Dispatchers.IO) {
+                    GitHubReleaseUpdater.checkForUpdate(context)
+                }
+            } catch (error: Exception) {
+                updateError = error.message ?: "Could not check for updates."
+            } finally {
+                updateChecking = false
+            }
+        }
+    }
+
+    fun downloadAppUpdate() {
+        val info = updateInfo ?: return
+        updateDownloading = true
+        updateProgress = 0f
+        updateDownloadedBytes = 0L
+        updateTotalBytes = 0L
+        updateError = ""
+        downloadedApk = null
+        updateScope.launch {
+            try {
+                downloadedApk = withContext(Dispatchers.IO) {
+                    GitHubReleaseUpdater.download(context, info) { downloaded, total ->
+                        mainHandler.post {
+                            updateDownloadedBytes = downloaded
+                            updateTotalBytes = total
+                            updateProgress = if (total > 0L) (downloaded.toFloat() / total).coerceIn(0f, 1f) else 0f
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                updateError = error.message ?: "APK download failed."
+            } finally {
+                updateDownloading = false
+            }
+        }
+    }
+
+    fun installAppUpdate(file: File) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+            updateError = "Allow this app to install unknown apps, then tap Install update again."
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+            )
+            return
+        }
+        try {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(installIntent)
+        } catch (error: Exception) {
+            updateError = error.message ?: "Could not open Android package installer."
+        }
+    }
 
     LaunchedEffect(activeName) {
         proxyConnected = false
@@ -394,6 +492,75 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Text(tx("Tap the round Proxy button to test the selected server. Tap VPN to start or stop the device tunnel."),
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Panel)
+            ) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tx("APP UPDATES"), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            Text(
+                                when {
+                                    updateChecking -> tx("Checking GitHub Releases…")
+                                    updateDownloading -> tx("Downloading update…")
+                                    downloadedApk != null -> tx("Update downloaded and ready to install")
+                                    updateInfo != null -> "${tx("New version available")}: ${updateInfo?.versionName}"
+                                    updateError.isNotBlank() -> tx("Update check needs attention")
+                                    else -> tx("You're using the latest version")
+                                },
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        TextButton(onClick = { checkForAppUpdate() }, enabled = !updateChecking && !updateDownloading) {
+                            Text(tx("Check"), color = Accent)
+                        }
+                    }
+                    updateInfo?.let { info ->
+                        Text(info.title, color = Muted, fontSize = 11.sp)
+                        if (info.notes.isNotBlank()) {
+                            Text(info.notes.take(240), color = Muted, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 4)
+                        }
+                    }
+                    if (updateDownloading) {
+                        LinearProgressIndicator(
+                            progress = updateProgress,
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Accent,
+                            trackColor = Color(0xFF26344D)
+                        )
+                        Text(
+                            if (updateTotalBytes > 0L) "${(updateProgress * 100).toInt()}% · ${formatUpdateBytes(updateDownloadedBytes)} / ${formatUpdateBytes(updateTotalBytes)}"
+                            else formatUpdateBytes(updateDownloadedBytes),
+                            color = Muted,
+                            fontSize = 11.sp
+                        )
+                    }
+                    if (updateError.isNotBlank()) {
+                        Text(tx(updateError), color = Color(0xFFFF8B8B), fontSize = 11.sp)
+                    }
+                    if (downloadedApk != null) {
+                        Button(
+                            onClick = { installAppUpdate(downloadedApk!!) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
+                        ) { Text(tx("Install update")) }
+                    } else if (updateInfo != null) {
+                        Button(
+                            onClick = { downloadAppUpdate() },
+                            enabled = !updateDownloading,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
+                        ) {
+                            Text(tx(if (updateDownloading) "Downloading…" else "Download update"))
+                        }
+                    }
                 }
             }
 
@@ -731,6 +898,9 @@ private fun Dashboard(store: ProxyProfileStore) {
 private fun tx(english: String): String {
     if (LocalConfiguration.current.locales[0].language != "ar") return english
     return when {
+        english.startsWith("Allow this app to install unknown apps") -> "اسمح للتطبيق بتثبيت التطبيقات غير المعروفة، ثم اضغط تثبيت التحديث مرة أخرى."
+        english.startsWith("Could not check for updates") -> "تعذر فحص التحديثات: " + english.substringAfter(":").trim()
+        english.startsWith("APK download failed") -> "فشل تنزيل الحزمة: " + english.substringAfter(":").trim()
         english.startsWith("Active profile: ") -> "ملف البروكسي النشط: " + english.removePrefix("Active profile: ")
         english.startsWith("Route for ") -> "مسار التطبيق: " + english.removePrefix("Route for ")
         english.startsWith("Proxy service returned no diagnostic message.") -> "لم تُرجع خدمة البروكسي أي رسالة تشخيصية."
@@ -743,7 +913,24 @@ private fun tx(english: String): String {
     }
 }
 
+private fun formatUpdateBytes(bytes: Long): String {
+    if (bytes < 1024L) return "$bytes B"
+    val mb = bytes / (1024.0 * 1024.0)
+    return String.format(java.util.Locale.US, "%.1f MB", mb)
+}
+
 private val arabicUi = mapOf(
+    "APP UPDATES" to "تحديثات التطبيق",
+    "Checking GitHub Releases…" to "جارٍ البحث عن تحديث على GitHub…",
+    "Downloading update…" to "جارٍ تنزيل التحديث…",
+    "Update downloaded and ready to install" to "تم تنزيل التحديث وأصبح جاهزًا للتثبيت",
+    "New version available" to "يتوفر إصدار جديد",
+    "Update check needs attention" to "تعذر إكمال فحص التحديث",
+    "You're using the latest version" to "أنت تستخدم أحدث إصدار",
+    "Check" to "فحص",
+    "Install update" to "تثبيت التحديث",
+    "Download update" to "تنزيل التحديث",
+    "Downloading…" to "جارٍ التنزيل…",
     "APPLICATION ROUTING" to "توجيه التطبيقات",
     "Installed apps" to "التطبيقات المثبتة",
     "Apps & routing" to "التطبيقات والتوجيه",
