@@ -192,8 +192,8 @@ private fun Dashboard(store: ProxyProfileStore) {
     var proxyStatus by remember { mutableStateOf("Not tested") }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val pageScrollState = rememberScrollState()
-    var updateSectionOffset by remember { mutableIntStateOf(0) }
-    var profilesSectionOffset by remember { mutableIntStateOf(0) }
+    var updateSectionOffset by remember { mutableStateOf(0) }
+    var profilesSectionOffset by remember { mutableStateOf(0) }
 
     var updateInfo by remember { mutableStateOf<AppUpdateInfo?>(null) }
     var updateChecking by remember { mutableStateOf(true) }
