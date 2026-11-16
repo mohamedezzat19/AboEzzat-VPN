@@ -5,8 +5,6 @@
 #include <mutex>
 #include <string>
 
-#include <string>
-
 extern "C" int tun2proxy_run_with_cli_args(const char* cli_args, unsigned short tun_mtu, bool packet_information);
 extern "C" int tun2proxy_stop();
 extern "C" void tun2proxy_clear_stop_request();
@@ -70,9 +68,10 @@ void on_native_traffic_status(const Tun2ProxyTrafficStatus* status, void*) {
         if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
             attached_here = true;
         } else {
-            PROTECT_LOGE("AttachCurrentThread failed for fd=%d", fd);
+            PROTECT_LOGE("AttachCurrentThread failed in traffic callback");
         }
     } else if (get_env != JNI_OK) {
+        PROTECT_LOGE("GetEnv failed (%d) in traffic callback", get_env);
         env = nullptr;
     }
 
@@ -112,6 +111,8 @@ bool protect_fd_from_native(int fd) {
     if (get_env == JNI_EDETACHED) {
         if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
             attached_here = true;
+        } else {
+            PROTECT_LOGE("AttachCurrentThread failed for fd=%d", fd);
         }
     } else if (get_env != JNI_OK) {
         PROTECT_LOGE("GetEnv failed (%d) for fd=%d", get_env, fd);
