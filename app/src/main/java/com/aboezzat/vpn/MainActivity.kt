@@ -182,6 +182,8 @@ private fun Dashboard(store: ProxyProfileStore) {
     var showEditor by remember { mutableStateOf(false) }
     var editorError by remember { mutableStateOf("") }
     val testResults = remember { mutableStateMapOf<String, ProxyTestResult>() }
+    val udpTestResults = remember { mutableStateMapOf<String, String>() }
+    val udpTesting = remember { mutableStateMapOf<String, Boolean>() }
     val testing = remember { mutableStateMapOf<String, Boolean>() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var tunnelActive by remember { mutableStateOf(AboEzzatVpnService.isTunnelRunning()) }
@@ -760,6 +762,58 @@ private fun Dashboard(store: ProxyProfileStore) {
                             colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
                         ) {
                             Text(tx(if (testing[profile.name] == true) "Testing protected socket…" else "Test via VPN service"))
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                udpTesting[profile.name] = true
+                                udpTestResults.remove(profile.name)
+                                val resultReceiver = object : ResultReceiver(mainHandler) {
+                                    override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                                        val supported = resultData?.getBoolean(
+                                            AboEzzatVpnService.EXTRA_SUCCESS,
+                                            resultCode == AboEzzatVpnService.RESULT_OK
+                                        ) ?: (resultCode == AboEzzatVpnService.RESULT_OK)
+                                        val message = resultData?.getString(AboEzzatVpnService.EXTRA_MESSAGE)
+                                            ?: "UDP diagnostic returned no result."
+                                        val relayHost = resultData?.getString(AboEzzatVpnService.EXTRA_UDP_RELAY_ADDRESS)
+                                        val relayPort = resultData?.getInt(AboEzzatVpnService.EXTRA_UDP_RELAY_PORT) ?: 0
+                                        udpTestResults[profile.name] = if (supported && !relayHost.isNullOrBlank() && relayPort > 0) {
+                                            "$message Relay: $relayHost:$relayPort"
+                                        } else message
+                                        udpTesting.remove(profile.name)
+                                    }
+                                }
+                                val udpIntent = Intent(context, AboEzzatVpnService::class.java).apply {
+                                    action = AboEzzatVpnService.ACTION_TEST_UPSTREAM_UDP
+                                    putExtra(AboEzzatVpnService.EXTRA_RESULT_RECEIVER, resultReceiver)
+                                    putExtra(AboEzzatVpnService.EXTRA_NAME, profile.name)
+                                    putExtra(AboEzzatVpnService.EXTRA_HOST, profile.host)
+                                    putExtra(AboEzzatVpnService.EXTRA_PORT, profile.port)
+                                    putExtra(AboEzzatVpnService.EXTRA_PROTOCOL, profile.protocol.name)
+                                    putExtra(AboEzzatVpnService.EXTRA_USERNAME, profile.username)
+                                    putExtra(AboEzzatVpnService.EXTRA_PASSWORD, profile.password)
+                                    putExtra(AboEzzatVpnService.EXTRA_REMOTE_DNS, profile.remoteDns)
+                                }
+                                try {
+                                    context.startService(udpIntent)
+                                } catch (error: Exception) {
+                                    udpTesting.remove(profile.name)
+                                    udpTestResults[profile.name] =
+                                        error.message ?: "Could not start the UDP diagnostic."
+                                }
+                            },
+                            enabled = udpTesting[profile.name] != true,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent)
+                        ) {
+                            Text(tx(if (udpTesting[profile.name] == true) "Checking SOCKS5 UDP…" else "Test UDP support"))
+                        }
+                        udpTestResults[profile.name]?.let { message ->
+                            Text(
+                                tx(message),
+                                color = if (message.contains("accepted")) Accent else Color(0xFFFFB86B),
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
                         }
                         Text(tx("This tests the upstream proxy handshake and calls protect() before connect. It does not start or stop the tunnel."),
                             color = Muted,
