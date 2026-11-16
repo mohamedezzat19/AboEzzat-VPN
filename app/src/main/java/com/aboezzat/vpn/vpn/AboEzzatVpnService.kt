@@ -506,7 +506,7 @@ class AboEzzatVpnService : VpnService() {
     /** Protect outbound diagnostic sockets before connect/send. */
     fun protectUpstreamSocket(socket: Socket): Boolean = protect(socket)
 
-    fun protectUpstreamDatagramSocket(socket: DatagramSocket): Boolean = protect(socket)
+    fun protectUpstreamDatagramSocket(socket: DatagramSocket): Boolean = protect(socket) // Keep diagnostic UDP outside the TUN
 
     /** Synchronous JNI callback. False is a hard failure for native callers. */
     @androidx.annotation.Keep
