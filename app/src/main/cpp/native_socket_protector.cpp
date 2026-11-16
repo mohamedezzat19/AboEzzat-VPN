@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <string>
 
@@ -9,12 +10,17 @@ extern "C" int tun2proxy_run_with_cli_args(const char* cli_args, unsigned short 
 extern "C" int tun2proxy_stop();
 extern "C" void tun2proxy_clear_stop_request();
 
+struct Tun2ProxyTrafficStatus { uint64_t tx; uint64_t rx; };
+using Tun2ProxyTrafficCallback = void (*)(const Tun2ProxyTrafficStatus*, void*);
+extern "C" void tun2proxy_set_traffic_status_callback(uint32_t, Tun2ProxyTrafficCallback, void*);
+
 namespace {
 JavaVM* g_vm = nullptr;
 std::mutex g_mutex;
 std::condition_variable g_idle;
 jobject g_service = nullptr;
 jmethodID g_protect_method = nullptr;
+jmethodID g_traffic_method = nullptr;
 unsigned int g_in_flight = 0;
 bool g_shutting_down = false;
 std::mutex g_engine_mutex;
@@ -30,6 +36,43 @@ bool protect_fd(JNIEnv* env, jobject service, jmethodID method, int fd) {
         return false;
     }
     return allowed == JNI_TRUE;
+}
+
+void on_native_traffic_status(const Tun2ProxyTrafficStatus* status, void*) {
+    if (status == nullptr || g_vm == nullptr) return;
+
+    jobject service = nullptr;
+    jmethodID method = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_shutting_down || g_service == nullptr || g_traffic_method == nullptr) return;
+        ++g_in_flight;
+        service = g_service;
+        method = g_traffic_method;
+    }
+
+    JNIEnv* env = nullptr;
+    bool attached_here = false;
+    const jint get_env = g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (get_env == JNI_EDETACHED) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached_here = true;
+        }
+    } else if (get_env != JNI_OK) {
+        env = nullptr;
+    }
+
+    if (env != nullptr) {
+        env->CallVoidMethod(service, method, static_cast<jlong>(status->tx), static_cast<jlong>(status->rx));
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
+    if (attached_here) g_vm->DetachCurrentThread();
+
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_in_flight > 0) --g_in_flight;
+        if (g_in_flight == 0) g_idle.notify_all();
+    }
 }
 
 bool protect_fd_from_native(int fd) {
@@ -89,8 +132,9 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeBindService(
     jclass service_class = env->GetObjectClass(service);
     if (service_class == nullptr) return JNI_FALSE;
     jmethodID method = env->GetMethodID(service_class, "protectNativeSocket", "(I)Z");
+    jmethodID traffic_method = env->GetMethodID(service_class, "onNativeTrafficStatus", "(JJ)V");
     env->DeleteLocalRef(service_class);
-    if (method == nullptr || env->ExceptionCheck()) {
+    if (method == nullptr || traffic_method == nullptr || env->ExceptionCheck()) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         return JNI_FALSE;
     }
@@ -105,6 +149,7 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeBindService(
     }
     g_service = global_service;
     g_protect_method = method;
+    g_traffic_method = traffic_method;
     return JNI_TRUE;
 }
 
@@ -119,6 +164,7 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeUnbindService(
         old_service = g_service;
         g_service = nullptr;
         g_protect_method = nullptr;
+        g_traffic_method = nullptr;
         g_shutting_down = false;
     }
     if (env != nullptr && old_service != nullptr) {
@@ -187,6 +233,7 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
         g_engine_running = true;
     }
 
+    tun2proxy_set_traffic_status_callback(1, &on_native_traffic_status, nullptr);
     const int result = tun2proxy_run_with_cli_args(
         chars,
         static_cast<unsigned short>(tun_mtu),
