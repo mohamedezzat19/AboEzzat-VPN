@@ -19,6 +19,12 @@ pub unsafe extern "C" fn tun2proxy_set_traffic_status_callback(
     if send_interval_secs > 0 {
         SEND_INTERVAL_SECS.store(send_interval_secs as u64, std::sync::atomic::Ordering::Relaxed);
     }
+    if let Ok(mut status) = TRAFFIC_STATUS.lock() {
+        *status = TrafficStatus::default();
+    }
+    if let Ok(mut stamp) = TIME_STAMP.lock() {
+        *stamp = std::time::Instant::now();
+    }
 }
 
 #[repr(C)]
