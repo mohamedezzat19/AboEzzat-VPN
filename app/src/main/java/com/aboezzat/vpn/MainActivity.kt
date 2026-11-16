@@ -190,6 +190,8 @@ private fun Dashboard(store: ProxyProfileStore) {
     var proxyConnected by remember { mutableStateOf(false) }
     var proxyTesting by remember { mutableStateOf(false) }
     var proxyStatus by remember { mutableStateOf("Not tested") }
+    var tunnelTxBytes by remember { mutableStateOf(0L) }
+    var tunnelRxBytes by remember { mutableStateOf(0L) }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val pageScrollState = rememberScrollState()
     var updateSectionOffset by remember { mutableStateOf(0) }
@@ -290,6 +292,11 @@ private fun Dashboard(store: ProxyProfileStore) {
     val tunnelResultReceiver = remember(mainHandler) {
         object : ResultReceiver(mainHandler) {
             override fun onReceiveResult(resultCode: Int, resultData: Bundle?) {
+                if (resultCode == AboEzzatVpnService.RESULT_TRAFFIC_UPDATE) {
+                    tunnelTxBytes = resultData?.getLong(AboEzzatVpnService.EXTRA_TX_BYTES) ?: tunnelTxBytes
+                    tunnelRxBytes = resultData?.getLong(AboEzzatVpnService.EXTRA_RX_BYTES) ?: tunnelRxBytes
+                    return
+                }
                 tunnelStatus = resultData?.getString(AboEzzatVpnService.EXTRA_MESSAGE)
                     ?: "Tunnel status updated."
                 when (resultCode) {
@@ -401,6 +408,8 @@ private fun Dashboard(store: ProxyProfileStore) {
             return
         }
         vpnPermissionGranted = true
+        tunnelTxBytes = 0L
+        tunnelRxBytes = 0L
         tunnelConnecting = true
         sendTunnelCommand(AboEzzatVpnService.ACTION_START_TUNNEL, profile)
     }
@@ -496,6 +505,16 @@ private fun Dashboard(store: ProxyProfileStore) {
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(tx(tunnelStatus), color = if (tunnelActive) Color(0xFF54D98C) else if (tunnelConnecting) Muted else Color(0xFFFF7777), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(tx("Sent"), color = Muted, fontSize = 10.sp)
+                            Text(android.text.format.Formatter.formatShortFileSize(context, tunnelTxBytes), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(tx("Received"), color = Muted, fontSize = 10.sp)
+                            Text(android.text.format.Formatter.formatShortFileSize(context, tunnelRxBytes), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
                     Text(tx("The current tunnel sends device traffic through the selected upstream proxy."),
                         color = Muted, fontSize = 12.sp, lineHeight = 18.sp
                     )
@@ -970,6 +989,8 @@ private val arabicUi = mapOf(
     "Installed apps" to "التطبيقات المثبتة",
     "App updates" to "تحديثات التطبيق",
     "Connection diagnostics" to "تشخيص الاتصال",
+    "Sent" to "مرسل",
+    "Received" to "مستقبل",
     "TCP proxy handshake status is shown in each profile. UDP and per-app routing support depend on the upstream server and are not assumed." to "تظهر نتيجة مصافحة TCP في كل ملف بروكسي. دعم UDP وتوجيه التطبيقات يعتمدان على الخادم ولا نفترض توفرهما.",
     "APP UPDATES" to "تحديثات التطبيق",
     "Checking GitHub Releases…" to "جارٍ البحث عن تحديث على GitHub…",
