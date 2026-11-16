@@ -60,7 +60,7 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build Release APK
-        run: gradle :app:testReleaseUnitTest :app:assembleRelease
+        run: gradle -PAPP_VERSION_CODE=${{ github.run_number }} -PAPP_VERSION_NAME=0.1.${{ github.run_number }} :app:testReleaseUnitTest :app:assembleRelease
 
       - name: Check signing configuration
         env:
@@ -103,3 +103,16 @@ jobs:
           name: AboEzzat-VPN-Release
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      - name: Publish GitHub Release for in-app updates
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.${{ github.run_number }}
+          name: AboEzzat VPN v0.1.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          body: |
+            versionCode: ${{ github.run_number }}
+
+            Signed Android Release APK. Install from the app's built-in updater.
+          files: app/build/outputs/apk/release/AboEzzat-VPN.apk
