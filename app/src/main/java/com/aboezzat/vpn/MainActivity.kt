@@ -477,7 +477,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Text(tx("CONNECTION STATUS"), color = Muted, fontSize = 11.sp, letterSpacing = 1.5.sp)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         ConnectionCircle(
@@ -490,14 +490,6 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 } else {
                                     connectSelectedProfile()
                                 }
-                            }
-                        )
-                        ConnectionCircle(
-                            title = "VPN",
-                            connected = null,
-                            connecting = false,
-                            onClick = {
-                                notice = "Country VPN mode is separate and will be enabled after the Proxy tunnel is verified."
                             }
                         )
                     }
@@ -554,7 +546,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                             }
                         }
                         }
-                    Text(tx("Tap the round Proxy button to test the selected server. Tap VPN to start or stop the device tunnel."),
+                    Text(tx("Tap the single Proxy button to connect or disconnect the device tunnel."),
                         color = Muted, fontSize = 10.sp, lineHeight = 15.sp
                     )
                 }
@@ -762,7 +754,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                             enabled = testing[profile.name] != true,
                             colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
                         ) {
-                            Text(tx(if (testing[profile.name] == true) "Testing protected socket…" else "Test via VPN service"))
+                            Text(tx(if (testing[profile.name] == true) "Testing protected socket…" else "Test TCP connection"))
                         }
                         OutlinedButton(
                             onClick = {
@@ -816,7 +808,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 lineHeight = 16.sp
                             )
                         }
-                        Text(tx("This tests the upstream proxy handshake and calls protect() before connect. It does not start or stop the tunnel."),
+                        Text(tx("TCP check: verifies the upstream proxy connection only. UDP is tested separately; neither check starts or stops the tunnel."),
                             color = Muted,
                             fontSize = 10.sp,
                             lineHeight = 14.sp
@@ -1104,7 +1096,7 @@ private val arabicUi = mapOf(
     "Testing proxy connection…" to "جارٍ اختبار اتصال البروكسي…",
     "Not tested" to "لم يتم الاختبار",
     "Testing" to "جارٍ الاختبار",
-    "Tap the round Proxy button to test the selected server. Tap VPN to start or stop the device tunnel." to "اضغط زر البروكسي الدائري لاختبار الخادم المحدد. واضغط زر VPN لتشغيل نفق الجهاز أو إيقافه.",
+    "Tap the single Proxy button to connect or disconnect the device tunnel." to "اضغط زر البروكسي الواحد لتوصيل نفق الجهاز أو قطع اتصاله.",
     "Add and select a proxy profile first." to "أضف ملف بروكسي وحدده أولًا.",
     "Grant Android VPN permission, then tap Connect again." to "امنح إذن VPN من Android ثم اضغط اتصال مرة أخرى.",
     "Could not send the tunnel command." to "تعذر إرسال أمر النفق.",
@@ -1162,8 +1154,8 @@ private val arabicUi = mapOf(
     "No authentication" to "بدون مصادقة",
     "Authentication saved securely" to "تم حفظ بيانات المصادقة بأمان",
     "Testing protected socket…" to "جارٍ اختبار الاتصال المحمي…",
-    "Test via VPN service" to "اختبار عبر خدمة VPN",
-    "This tests the upstream proxy handshake and calls protect() before connect. It does not start or stop the tunnel." to "يختبر هذا مصافحة البروكسي الأصلي ويستدعي protect() قبل الاتصال. ولا يبدأ النفق أو يوقفه.",
+    "Test TCP connection" to "اختبار اتصال TCP",
+    "TCP check: verifies the upstream proxy connection only. UDP is tested separately; neither check starts or stops the tunnel." to "اختبار TCP: يتحقق من اتصال البروكسي الأصلي فقط. يتم اختبار UDP بشكل منفصل، ولا يبدأ أي من الاختبارين النفق أو يوقفه.",
     "HANDSHAKE OK" to "نجاح المصافحة",
     "FAILED" to "فشل",
     "PER-APP ROUTING POLICIES" to "سياسات التوجيه لكل تطبيق",
