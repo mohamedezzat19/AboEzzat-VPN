@@ -540,6 +540,13 @@ where
                     }
                     assert_eq!(args.dns, ArgDns::Direct);
                 }
+                // DNS above remains available over UDP so Android name resolution works.
+                // Other UDP (including QUIC) is deliberately not forwarded by default;
+                // clients can fall back to TCP. Use --udp-enabled to opt in.
+                if !args.udp_enabled {
+                    log::debug!("Dropping non-DNS UDP session by default: {info}");
+                    continue;
+                }
                 let domain_name = if let Some(virtual_dns) = &virtual_dns {
                     let mut virtual_dns = virtual_dns.lock().await;
                     virtual_dns.touch_ip(&udp.peer_addr().ip());
