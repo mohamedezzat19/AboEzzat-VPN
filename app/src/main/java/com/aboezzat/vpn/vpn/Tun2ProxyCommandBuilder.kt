@@ -37,6 +37,10 @@ internal object Tun2ProxyCommandBuilder {
             "--dns", dnsMode,
             "--ipv6-enabled",
             "--mtu", mtu.toString(),
+            // Advertise an MSS safe for both IPv4 and IPv6 (MTU - 60).
+            // Without this, the userspace TCP stack omits MSS and peers may
+            // fall back to a much smaller default segment size.
+            "--tcp-mss", (mtu - 60).toString(),
             "--verbosity", "info"
         )
 
