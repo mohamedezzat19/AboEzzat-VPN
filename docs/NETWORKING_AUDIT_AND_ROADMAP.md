@@ -36,7 +36,7 @@ Stop speculative one-off patches. Establish one reproducible data path, test eac
 
 ## Stage 1 — proxy-only baseline (no TUN)
 
-The first stage must isolate the upstream proxy from Android VPN routing:
+The first stage must isolate the upstream proxy from Android VPN routing. Use an in-app WebView browser configured through AndroidX WebKit ProxyController with either the HTTP proxy URL or SOCKS proxy URL. Android documents this as a process-specific override for WebView requests; it does not configure unrelated apps:
 
 - HTTP CONNECT to a known HTTPS destination: proxy handshake, TLS handshake, and actual HTTP response body.
 - SOCKS5 CONNECT to both a domain name and an IP address; no-auth and username/password paths.
@@ -45,7 +45,7 @@ The first stage must isolate the upstream proxy from Android VPN routing:
 - Test a non-DNS UDP destination separately. A DNS datagram round-trip alone is not a QUIC test.
 - Record exact connect/handshake durations and errors. No TUN should be running during these baseline tests.
 
-**Limit:** this stage cannot transparently route every Android app without a VPN. Only apps with their own proxy setting or an explicit system proxy will use a normal proxy. Device-wide app capture is Stage 2.
+**Limit:** this browser mode affects only WebViews inside AboEzzat VPN. It cannot transparently route every Android app without a VPN. Device-wide app capture is Stage 2.
 
 ## Stage 2 — proxy + VPN
 
