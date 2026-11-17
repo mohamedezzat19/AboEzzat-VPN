@@ -257,15 +257,15 @@ mod tests {
     fn expired_mapping_is_reclaimed_and_active_mapping_can_be_touched() {
         let mut dns = dns("198.18.0.0/29");
         let name = "expired.example".to_string();
-        let ip = dns.find_or_allocate_ip(name.clone()).unwrap();
+        let ip = dns.find_or_allocate_ip(name.clone(), false).unwrap();
         dns.lru_cache.get_mut(&ip).unwrap().expiry = Instant::now() - Duration::from_secs(1);
 
-        let reclaimed_ip = dns.find_or_allocate_ip(name.clone()).unwrap();
+        let reclaimed_ip = dns.find_or_allocate_ip(name.clone(), false).unwrap();
         assert_eq!(reclaimed_ip, ip);
 
         dns.lru_cache.get_mut(&ip).unwrap().expiry = Instant::now() - Duration::from_secs(1);
         dns.touch_ip(&ip);
-        let touched_ip = dns.find_or_allocate_ip(name).unwrap();
+        let touched_ip = dns.find_or_allocate_ip(name, false).unwrap();
         assert_eq!(touched_ip, ip);
     }
 }
