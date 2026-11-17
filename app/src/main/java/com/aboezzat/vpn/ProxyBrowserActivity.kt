@@ -21,6 +21,7 @@ import androidx.webkit.ProxyConfig
 import androidx.webkit.ProxyController
 import androidx.webkit.WebViewFeature
 import com.aboezzat.vpn.proxy.ProxyBrowserConfig
+import com.aboezzat.vpn.vpn.AboEzzatVpnService
 
 class ProxyBrowserActivity : AppCompatActivity() {
     private var browser: WebView? = null
