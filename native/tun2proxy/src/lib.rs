@@ -532,25 +532,13 @@ where
                 }
                 let session_count = SessionCountGuard::new(task_count.clone());
                 let info = SessionInfo::new(tcp.local_addr(), tcp.peer_addr(), IpProtocol::Tcp);
-                if info.dst.port() == DNS_PORT && args.dns == ArgDns::Virtual {
-                    // In virtual-DNS mode, TCP fallback queries must be answered
-                    // locally just like UDP queries.
-
-                    if let Some(virtual_dns) = virtual_dns.clone() {
-                        session_tasks.spawn(async move {
-                            let _session_count = session_count;
-                            if let Err(err) = handle_virtual_dns_tcp_session(tcp, virtual_dns).await {
-                                log::error!("{info} virtual DNS-over-TCP error \"{err}\"");
-                            }
-                        });
-                    } else {
-                        log::error!("{info} virtual DNS mode has no DNS mapping table");
-                    }
-                    continue;
-                }
-                if info.dst.port() == DNS_PORT && args.dns == ArgDns::OverTcp {
-                    // TCP DNS fallback in remote-DNS mode must reach the configured
-                    // resolver, not the synthetic DNS address assigned to the TUN.
+                if info.dst.port() == DNS_PORT
+                    && matches!(args.dns, ArgDns::Virtual | ArgDns::OverTcp)
+                {
+                    // TCP DNS (including truncation fallback) always reaches the
+                    // real resolver through the proxy. Real A/AAAA answers are
+                    // safe here because subsequent connections are still proxied
+                    // by destination IP; UDP A/AAAA keeps virtual hostname mapping.
                     let dns_info = normalize_dns_destination(info, dns_addr);
                     let proxy_handler = match mgr.new_proxy_handler(dns_info, None, false).await {
                         Ok(proxy_handler) => proxy_handler,
@@ -613,12 +601,22 @@ where
                         continue;
                     }
                     if args.dns == ArgDns::Virtual {
+                        let manager = mgr.clone();
+                        let queue = socket_queue.clone();
                         session_tasks.spawn(async move {
                             let _session_count = session_count;
                             if let Some(virtual_dns) = virtual_dns
-                                && let Err(err) = handle_virtual_dns_session(udp, virtual_dns).await
+                                && let Err(err) = handle_virtual_dns_session(
+                                    udp,
+                                    virtual_dns,
+                                    info,
+                                    manager,
+                                    queue,
+                                    ipv6_enabled,
+                                )
+                                .await
                             {
-                                log::error!("{info} error \"{err}\"");
+                                log::error!("{info} virtual DNS session error \"{err}\"");
                             }
                         });
                         continue;
@@ -723,59 +721,56 @@ fn normalize_dns_destination(mut info: SessionInfo, dns_addr: IpAddr) -> Session
     info
 }
 
-fn decode_dns_tcp_queries(buffer: &mut Vec<u8>, received: &[u8]) -> crate::Result<Vec<Vec<u8>>> {
-    buffer.extend_from_slice(received);
-
-    let mut consumed = 0;
-    let mut queries = Vec::new();
-    while buffer.len().saturating_sub(consumed) >= 2 {
-        let message_len = u16::from_be_bytes([buffer[consumed], buffer[consumed + 1]]) as usize;
-        if message_len == 0 {
-            return Err("DNS-over-TCP query has an empty frame".into());
-        }
-        let frame_end = consumed + 2 + message_len;
-        if buffer.len() < frame_end {
-            break;
-        }
-        queries.push(buffer[consumed + 2..frame_end].to_vec());
-        consumed = frame_end;
+async fn forward_dns_query_over_tcp<S>(
+    server: &mut S,
+    query: &[u8],
+    ipv6_enabled: bool,
+) -> crate::Result<Vec<u8>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    if query.len() < 12 {
+        return Err("DNS query is shorter than its header".into());
     }
 
-    if consumed > 0 {
-        buffer.drain(..consumed);
+    let query_len = u16::try_from(query.len())?;
+    server.write_all(&query_len.to_be_bytes()).await?;
+    server.write_all(query).await?;
+
+    let mut length_prefix = [0_u8; 2];
+    server.read_exact(&mut length_prefix).await?;
+    let response_len = u16::from_be_bytes(length_prefix) as usize;
+    if response_len < 12 {
+        return Err("DNS-over-TCP resolver returned an incomplete response".into());
     }
-    Ok(queries)
+
+    let mut response = vec![0_u8; response_len];
+    server.read_exact(&mut response).await?;
+    if response.get(0..2) != query.get(0..2) || response[2] & 0x80 == 0 {
+        return Err("DNS-over-TCP resolver returned a mismatched response".into());
+    }
+
+    let mut message = dns::parse_data_to_dns_message(&response, false)?;
+    if !ipv6_enabled {
+        dns::remove_ipv6_entries(&mut message);
+    }
+    Ok(message.to_vec()?)
 }
 
-async fn handle_virtual_dns_tcp_session(
-    mut tcp: IpStackTcpStream,
+async fn handle_virtual_dns_session(
+    mut udp: IpStackUdpStream,
     dns: Arc<Mutex<VirtualDns>>,
+    session_info: SessionInfo,
+    manager: Arc<dyn ProxyHandlerManager>,
+    socket_queue: Option<Arc<SocketQueue>>,
+    ipv6_enabled: bool,
 ) -> crate::Result<()> {
-    let mut buf = [0_u8; 8192];
-    let mut pending = Vec::new();
-    loop {
-        let len = tcp.read(&mut buf).await?;
-        if len == 0 {
-            break;
-        }
-        for query in decode_dns_tcp_queries(&mut pending, &buf[..len])? {
-            let (response, qname, ip) = dns.lock().await.generate_query(&query)?;
-            let response_len = u16::try_from(response.len())?;
-            tcp.write_all(&response_len.to_be_bytes()).await?;
-            tcp.write_all(&response).await?;
-            log::debug!("Virtual DNS-over-TCP query: {qname} -> {ip}");
-        }
-    }
-    Ok(())
-}
-
-async fn handle_virtual_dns_session(mut udp: IpStackUdpStream, dns: Arc<Mutex<VirtualDns>>) -> crate::Result<()> {
     let mut buf = [0_u8; 4096];
     loop {
         let len = match udp.read(&mut buf).await {
             Err(e) => {
-                // indicate UDP read fails not an error.
-                log::debug!("Virtual DNS session error: {e}");
+                // A closed UDP session is normal; report it at debug level.
+                log::debug!("Virtual DNS session {session_info} closed: {e}");
                 break;
             }
             Ok(len) => len,
@@ -783,9 +778,26 @@ async fn handle_virtual_dns_session(mut udp: IpStackUdpStream, dns: Arc<Mutex<Vi
         if len == 0 {
             break;
         }
-        let (msg, qname, ip) = dns.lock().await.generate_query(&buf[..len])?;
-        udp.write_all(&msg).await?;
-        log::debug!("Virtual DNS query: {qname} -> {ip}");
+
+        let query = &buf[..len];
+        let synthetic_query = dns.lock().await.is_synthetic_query(query)?;
+        let response = if synthetic_query {
+            let (message, qname, ip) = dns.lock().await.generate_query(query)?;
+            log::debug!("Virtual DNS query: {qname} -> {ip}");
+            message
+        } else {
+            // Preserve SRV/TXT/HTTPS/SVCB and other records by asking the real
+            // resolver through the same proxy. Never fall back to device DNS.
+            let mut dns_info = session_info;
+            dns_info.protocol = IpProtocol::Tcp;
+            let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
+            let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
+            let response = forward_dns_query_over_tcp(&mut server, query, ipv6_enabled).await?;
+            log::debug!("Virtual DNS forwarded non-A/AAAA query through proxy: {session_info}");
+            response
+        };
+
+        udp.write_all(&response).await?;
     }
     Ok(())
 }
@@ -1558,5 +1570,49 @@ mod proxy_connection_timeout_tests {
         assert!(error.to_string().contains("handshake timed out"));
         assert!(started.elapsed() < Duration::from_millis(500));
         server_task.abort();
+    }
+}
+
+
+#[cfg(test)]
+mod virtual_dns_tcp_fallback_tests {
+    use super::*;
+    use hickory_proto::{
+        op::{Message, MessageType, OpCode, Query},
+        rr::{Name, RecordType},
+    };
+    use std::str::FromStr;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn forwards_non_address_dns_query_using_tcp_length_prefix() {
+        let mut message = Message::new(0x1234, MessageType::Query, OpCode::Query);
+        message.add_query(Query::query(
+            Name::from_str("service.example.").unwrap(),
+            RecordType::TXT,
+        ));
+        let query = message.to_vec().unwrap();
+
+        let mut expected_response = query.clone();
+        expected_response[2] |= 0x80;
+
+        let (mut client, mut resolver) = tokio::io::duplex(4096);
+        let resolver_task = tokio::spawn(async move {
+            let mut prefix = [0_u8; 2];
+            resolver.read_exact(&mut prefix).await.unwrap();
+            let query_len = u16::from_be_bytes(prefix) as usize;
+            let mut received_query = vec![0_u8; query_len];
+            resolver.read_exact(&mut received_query).await.unwrap();
+            assert_eq!(received_query, query);
+
+            let response_len = u16::try_from(expected_response.len()).unwrap();
+            resolver.write_all(&response_len.to_be_bytes()).await.unwrap();
+            resolver.write_all(&expected_response).await.unwrap();
+        });
+
+        let response = forward_dns_query_over_tcp(&mut client, &query, true).await.unwrap();
+        assert_eq!(response.get(0..2), query.get(0..2));
+        assert_ne!(response[2] & 0x80, 0);
+        resolver_task.await.unwrap();
     }
 }

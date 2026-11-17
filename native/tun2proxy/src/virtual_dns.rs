@@ -60,12 +60,26 @@ impl VirtualDns {
         }
     }
 
-    /// Returns the DNS response to send back to the client.
+    /// Only A and AAAA can be answered with a synthetic address. Other
+    /// record types must be resolved by the upstream DNS server through proxy.
+    pub fn is_synthetic_query(&self, data: &[u8]) -> Result<bool> {
+        use crate::dns;
+        let message = dns::parse_data_to_dns_message(data, false)?;
+        Ok(
+            message.queries.len() == 1
+                && matches!(message.queries[0].query_type(), RecordType::A | RecordType::AAAA),
+        )
+    }
+
+    /// Returns a synthetic DNS response for A/AAAA queries only.
     pub fn generate_query(&mut self, data: &[u8]) -> Result<(Vec<u8>, String, IpAddr)> {
         use crate::dns;
         let mut message = dns::parse_data_to_dns_message(data, false)?;
         let qname = dns::extract_domain_from_dns_message(&message)?;
         let query_type = message.queries[0].query_type();
+        if !matches!(query_type, RecordType::A | RecordType::AAAA) {
+            return Err("Virtual DNS only synthesizes A and AAAA records".into());
+        }
         let ip = self.find_or_allocate_ip(qname.clone(), query_type == RecordType::AAAA)?;
         if matches!((query_type, ip.is_ipv4()), (RecordType::A, true) | (RecordType::AAAA, false)) {
             message = dns::build_dns_response(message, &qname, ip, 5)?;
@@ -201,6 +215,21 @@ mod tests {
 
     fn dns(pool: &str) -> VirtualDns {
         VirtualDns::new(IpCidr::from_str(pool).unwrap())
+    }
+
+    #[test]
+    fn only_a_and_aaaa_are_synthetic_dns_queries() {
+        let dns = dns("198.18.0.0/15");
+        assert!(dns.is_synthetic_query(&query_wire("example.org.", RecordType::A)).unwrap());
+        assert!(dns.is_synthetic_query(&query_wire("example.org.", RecordType::AAAA)).unwrap());
+        assert!(!dns.is_synthetic_query(&query_wire("example.org.", RecordType::TXT)).unwrap());
+        assert!(!dns.is_synthetic_query(&query_wire("_service._tcp.example.org.", RecordType::SRV)).unwrap());
+    }
+
+    #[test]
+    fn virtual_dns_rejects_non_address_query_synthesis() {
+        let mut dns = dns("198.18.0.0/15");
+        assert!(dns.generate_query(&query_wire("example.org.", RecordType::TXT)).is_err());
     }
 
     #[test]
