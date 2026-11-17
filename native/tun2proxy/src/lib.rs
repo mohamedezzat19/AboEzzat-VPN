@@ -74,6 +74,9 @@ const DNS_PORT: u16 = 53;
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const PROXY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const DNS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+// Larger relay chunks reduce per-read/write overhead on high-throughput TCP flows.
+// This is per active TCP direction, not a socket kernel-buffer setting.
+const TCP_RELAY_BUFFER_SIZE: usize = 64 * 1024;
 
 #[cfg(target_os = "android")]
 unsafe extern "C" {
@@ -984,7 +987,7 @@ where
     R: tokio::io::AsyncRead + Unpin + ?Sized,
     W: tokio::io::AsyncWrite + Unpin + ?Sized,
 {
-    let mut buf = vec![0; 8192];
+    let mut buf = vec![0; TCP_RELAY_BUFFER_SIZE];
     let mut total = 0;
     loop {
         match reader.read(&mut buf).await? {
