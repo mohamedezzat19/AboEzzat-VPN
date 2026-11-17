@@ -889,6 +889,23 @@ async fn handle_udp_gateway_session(
     Ok(())
 }
 
+/// Select a usable UDP relay endpoint from the SOCKS5 BND.ADDR response.
+/// Some proxies advertise an unspecified address (RFC 1928) or incorrectly
+/// advertise loopback even though the client reached them over the network.
+fn normalize_udp_relay_addr(proxy_addr: SocketAddr, advertised: SocketAddr) -> crate::Result<SocketAddr> {
+    if advertised.port() == 0 {
+        return Err("SOCKS5 UDP relay returned an invalid port 0".into());
+    }
+
+    let unusable_advertised_ip = advertised.ip().is_unspecified()
+        || (advertised.ip().is_loopback() && !proxy_addr.ip().is_loopback());
+    if unusable_advertised_ip {
+        Ok(SocketAddr::new(proxy_addr.ip(), advertised.port()))
+    } else {
+        Ok(advertised)
+    }
+}
+
 async fn handle_udp_associate_session(
     mut udp_stack: IpStackUdpStream,
     proxy_type: ProxyType,
@@ -921,14 +938,19 @@ async fn handle_udp_associate_session(
         }
     };
 
-    // RFC 1928 allows a SOCKS5 UDP relay to report 0.0.0.0 or :: when
-    // it expects the client to use the proxy server's address. Connecting
-    // to an unspecified destination drops UDP traffic on Android/Linux.
-    let udp_addr = if udp_addr.ip().is_unspecified() {
-        SocketAddr::new(server_addr.ip(), udp_addr.port())
+    // RFC 1928 allows an unspecified relay address. Also compensate for
+    // proxies that incorrectly advertise loopback to remote clients.
+    let advertised_udp_addr = udp_addr;
+    let udp_addr = normalize_udp_relay_addr(server_addr, advertised_udp_addr)?;
+    if udp_addr != advertised_udp_addr {
+        log::warn!(
+            "SOCKS5 UDP relay address adjusted: advertised={advertised_udp_addr}, proxy={server_addr}, effective={udp_addr}"
+        );
     } else {
-        udp_addr
-    };
+        log::info!(
+            "SOCKS5 UDP relay address accepted: advertised={advertised_udp_addr}, proxy={server_addr}"
+        );
+    }
 
     let mut udp_server = create_udp_stream(&socket_queue, udp_addr).await?;
 
@@ -1208,6 +1230,52 @@ mod dns_tcp_response_tests {
         assert_eq!(a_response.answers.len(), 1);
         let aaaa_response = dns::parse_data_to_dns_message(&responses[1], false).unwrap();
         assert!(aaaa_response.answers.is_empty());
+    }
+
+    #[test]
+    fn socks5_unspecified_udp_relay_uses_proxy_endpoint() {
+        let proxy: SocketAddr = "10.100.93.82:1088".parse().unwrap();
+        let advertised: SocketAddr = "0.0.0.0:34699".parse().unwrap();
+        assert_eq!(
+            normalize_udp_relay_addr(proxy, advertised).unwrap(),
+            "10.100.93.82:34699".parse::<SocketAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn socks5_unspecified_ipv6_udp_relay_uses_proxy_endpoint() {
+        let proxy: SocketAddr = "10.100.93.82:1088".parse().unwrap();
+        let advertised: SocketAddr = "[::]:34699".parse().unwrap();
+        assert_eq!(
+            normalize_udp_relay_addr(proxy, advertised).unwrap(),
+            "10.100.93.82:34699".parse::<SocketAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn socks5_loopback_relay_is_rewritten_only_for_remote_proxy() {
+        let remote_proxy: SocketAddr = "10.100.93.82:1088".parse().unwrap();
+        let loopback_relay: SocketAddr = "127.0.0.1:34699".parse().unwrap();
+        assert_eq!(
+            normalize_udp_relay_addr(remote_proxy, loopback_relay).unwrap(),
+            "10.100.93.82:34699".parse::<SocketAddr>().unwrap()
+        );
+
+        let local_proxy: SocketAddr = "127.0.0.1:1088".parse().unwrap();
+        assert_eq!(
+            normalize_udp_relay_addr(local_proxy, loopback_relay).unwrap(),
+            loopback_relay
+        );
+    }
+
+    #[test]
+    fn socks5_explicit_udp_relay_is_preserved_and_zero_port_is_rejected() {
+        let proxy: SocketAddr = "10.100.93.82:1088".parse().unwrap();
+        let advertised: SocketAddr = "10.100.93.90:34699".parse().unwrap();
+        assert_eq!(normalize_udp_relay_addr(proxy, advertised).unwrap(), advertised);
+
+        let invalid: SocketAddr = "0.0.0.0:0".parse().unwrap();
+        assert!(normalize_udp_relay_addr(proxy, invalid).is_err());
     }
 
     #[test]
