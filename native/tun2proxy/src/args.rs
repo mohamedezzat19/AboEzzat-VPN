@@ -75,6 +75,10 @@ pub struct Args {
     #[arg(short = '6', long)]
     pub ipv6_enabled: bool,
 
+    /// Forward non-DNS UDP sessions through SOCKS5 UDP ASSOCIATE. Disabled by default.
+    #[arg(long, default_value_t = false)]
+    pub udp_enabled: bool,
+
     /// Routing and system setup, which decides whether to setup the routing and system configuration.
     /// This option requires root-like privileges on every platform.
     /// It is very important on Linux, see `capabilities(7)`.
@@ -188,6 +192,7 @@ impl Default for Args {
             #[cfg(all(target_os = "linux", feature = "unshare"))]
             admin_command: Vec::new(),
             ipv6_enabled: false,
+            udp_enabled: false,
             setup,
             dns: ArgDns::default(),
             dns_addr: "8.8.8.8".parse().unwrap(),
