@@ -478,10 +478,10 @@ where
                 }
                 let session_count = SessionCountGuard::new(task_count.clone());
                 let info = SessionInfo::new(tcp.local_addr(), tcp.peer_addr(), IpProtocol::Tcp);
-                // In virtual-DNS mode, TCP fallback queries must be answered
-                // locally just like UDP queries. Sending them to the upstream
-                // proxy would target the synthetic TUN DNS address and fail.
                 if info.dst.port() == DNS_PORT && args.dns == ArgDns::Virtual {
+                    // In virtual-DNS mode, TCP fallback queries must be answered
+                    // locally just like UDP queries.
+
                     if let Some(virtual_dns) = virtual_dns.clone() {
                         session_tasks.spawn(async move {
                             let _session_count = session_count;
@@ -492,6 +492,23 @@ where
                     } else {
                         log::error!("{info} virtual DNS mode has no DNS mapping table");
                     }
+                    continue;
+                }
+                if info.dst.port() == DNS_PORT && args.dns == ArgDns::OverTcp {
+                    // TCP DNS fallback in remote-DNS mode must reach the configured
+                    // resolver, not the synthetic DNS address assigned to the TUN.
+                    let dns_info = normalize_dns_destination(info, dns_addr);
+                    let proxy_handler = match mgr.new_proxy_handler(dns_info, None, false).await {
+                        Ok(proxy_handler) => proxy_handler,
+                        Err(err) => break 'run Err(err),
+                    };
+                    let queue = socket_queue.clone();
+                    session_tasks.spawn(async move {
+                        let _session_count = session_count;
+                        if let Err(err) = handle_tcp_session(tcp, proxy_handler, queue).await {
+                            log::error!("{dns_info} DNS-over-TCP proxy error \"{err}\"");
+                        }
+                    });
                     continue;
                 }
                 let domain_name = if let Some(virtual_dns) = &virtual_dns {
@@ -525,9 +542,7 @@ where
                 let session_count = SessionCountGuard::new(task_count.clone());
                 let mut info = SessionInfo::new(udp.local_addr(), udp.peer_addr(), IpProtocol::Udp);
                 if info.dst.port() == DNS_PORT {
-                    if is_private_ip(info.dst.ip()) {
-                        info.dst.set_ip(dns_addr); // !!! Here we change the destination address to remote DNS server!!!
-                    }
+                    info = normalize_dns_destination(info, dns_addr);
                     if args.dns == ArgDns::OverTcp {
                         info.protocol = IpProtocol::Tcp;
                         let proxy_handler = match mgr.new_proxy_handler(info, None, false).await {
@@ -645,6 +660,13 @@ mod socket_queue_tests {
         assert!(queue.tcp_v6.is_none());
         assert!(queue.udp_v6.is_none());
     }
+}
+
+fn normalize_dns_destination(mut info: SessionInfo, dns_addr: IpAddr) -> SessionInfo {
+    if is_private_ip(info.dst.ip()) {
+        info.dst.set_ip(dns_addr);
+    }
+    info
 }
 
 fn decode_dns_tcp_queries(buffer: &mut Vec<u8>, received: &[u8]) -> crate::Result<Vec<Vec<u8>>> {
@@ -1266,6 +1288,25 @@ mod dns_tcp_response_tests {
         frame.extend_from_slice(&(message.len() as u16).to_be_bytes());
         frame.extend_from_slice(&message);
         frame
+    }
+
+    #[test]
+    fn private_dns_destination_uses_configured_remote_resolver() {
+        let info = SessionInfo::new(
+            "10.77.0.2:53000".parse().unwrap(),
+            "10.77.0.1:53".parse().unwrap(),
+            IpProtocol::Tcp,
+        );
+        let normalized = normalize_dns_destination(info, "8.8.8.8".parse().unwrap());
+        assert_eq!(normalized.dst, "8.8.8.8:53".parse().unwrap());
+
+        let public_dns = SessionInfo::new(
+            "10.77.0.2:53000".parse().unwrap(),
+            "1.1.1.1:53".parse().unwrap(),
+            IpProtocol::Tcp,
+        );
+        let unchanged = normalize_dns_destination(public_dns, "8.8.8.8".parse().unwrap());
+        assert_eq!(unchanged.dst, "1.1.1.1:53".parse().unwrap());
     }
 
     #[test]
