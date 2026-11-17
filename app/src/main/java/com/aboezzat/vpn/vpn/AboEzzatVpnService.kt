@@ -18,6 +18,7 @@ import com.aboezzat.vpn.ConnectionDiagnostics
 import com.aboezzat.vpn.proxy.ProxyConnectionTester
 import com.aboezzat.vpn.proxy.ProxyTestRequestParser
 import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.ProxyProtocol
 import com.aboezzat.vpn.proxy.Socks5UdpAssociateTester
 import com.aboezzat.vpn.data.AppRouteStore
 import com.aboezzat.vpn.core.RouteMode
@@ -275,16 +276,32 @@ class AboEzzatVpnService : VpnService() {
 
         // Only report the tunnel as running after the native worker accepted the session.
         tunnelRunning = true
-        ConnectionDiagnostics.add(this, "Tunnel worker accepted; upstream internet traffic is not yet verified; direct bypass apps=" + directBypassCount)
+        val udpForwardingEnabled = profile.protocol == ProxyProtocol.SOCKS5
+        val transportStatus = if (udpForwardingEnabled) {
+            "SOCKS5 UDP/QUIC forwarding enabled (30s idle timeout)"
+        } else {
+            "HTTP CONNECT is TCP-only; non-DNS UDP/QUIC is not forwarded"
+        }
+        ConnectionDiagnostics.add(
+            this,
+            "Tunnel worker accepted; internet not verified; protocol=${profile.protocol}; " +
+                "udpForwardingEnabled=$udpForwardingEnabled; remoteDns=${profile.remoteDns}; " +
+                "directBypassApps=$directBypassCount"
+        )
         receiver?.send(
             RESULT_STARTED,
             Bundle().apply {
                 putBoolean(EXTRA_SUCCESS, true)
                 putInt(EXTRA_DIRECT_BYPASS_COUNT, directBypassCount)
-                putString(EXTRA_MESSAGE, "Tunnel worker started via ${profile.name}. Direct bypass active for $directBypassCount app(s); other saved route modes are not separately enforced yet.")
+                putString(
+                    EXTRA_MESSAGE,
+                    "Tunnel worker started via ${profile.name}. $transportStatus. " +
+                        "Direct bypass active for $directBypassCount app(s); " +
+                        "VPN only and Proxy + VPN route modes are not separately implemented yet."
+                )
             }
         )
-        updateTunnelNotification("Tunnel worker running via ${profile.name} · internet not verified · $directBypassCount direct bypass")
+        updateTunnelNotification("Tunnel running · ${profile.protocol} · $transportStatus · internet not verified")
     }
 
     private fun stopTunnel(intent: Intent, startId: Int) {
