@@ -100,7 +100,7 @@ class ProxyBrowserActivity : AppCompatActivity() {
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_GO
             setText("https://example.com")
         }
