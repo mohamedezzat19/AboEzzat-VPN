@@ -515,6 +515,12 @@ class AboEzzatVpnService : VpnService() {
         super.onDestroy()
     }
 
+    /** Receive privacy-safe DNS diagnostics from the native Rust engine. */
+    @androidx.annotation.Keep
+    fun onNativeDiagnostic(message: String) {
+        ConnectionDiagnostics.add(this, message)
+    }
+
     /** Receive native tunnel byte counters from the Rust engine. */
     @androidx.annotation.Keep
     fun onNativeTrafficStatus(txBytes: Long, rxBytes: Long) {
