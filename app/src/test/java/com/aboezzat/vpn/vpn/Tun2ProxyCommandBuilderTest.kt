@@ -24,6 +24,8 @@ class Tun2ProxyCommandBuilderTest {
         assertTrue(command.contains("'--proxy' 'http://proxy.example:8080'"))
         assertTrue(command.contains("'--dns' 'virtual'"))
         assertTrue(command.contains("'--ipv6-enabled'"))
+        assertTrue(!command.contains("'--udp-enabled'"))
+        assertTrue(!command.contains("'--udp-timeout'"))
     }
 
     @Test
@@ -40,6 +42,8 @@ class Tun2ProxyCommandBuilderTest {
         val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 9)
 
         assertTrue(command!!.contains("socks5://user%20name:p%40ss%3A%2F%23%3F@[2001:db8::10]:1080"))
+        assertTrue(command.contains("'--udp-enabled'"))
+        assertTrue(command.contains("'--udp-timeout' '30'"))
         assertTrue(!command.contains("p@ss:/#?"))
     }
 
