@@ -8331,3 +8331,716 @@ private fun Ipv4UdpDnsPacketCodec.parseResponseForTest(packet: ByteArray): Tripl
     return Triple(sourcePort, destinationPort, packet.copyOfRange(ihl + 8, packet.size))
 }
 
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketLoopTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 4454 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Test
+
+class Ipv4UdpDnsPacketLoopTest {
+    @Test
+    fun skipsInvalidDnsPacketAndContinuesWithNextPacket() {
+        val query = dnsQuery()
+        val validPacket = makePacket(query)
+        val invalidPacket = validPacket.copyOf().also { it[0] = 0x65 }
+        val source = FakeSource(listOf(invalidPacket, validPacket))
+        val written = mutableListOf<ByteArray>()
+        var resolverCalls = 0
+        val processor = Ipv4UdpDnsPacketProcessor(resolver = DnsPacketResolver { dns ->
+            resolverCalls++
+            dns.copyOf().also {
+                it[2] = 0x81.toByte()
+                it[3] = 0x80.toByte()
+            }
+        })
+        val loop = Ipv4UdpDnsPacketLoop(
+            source = source,
+            sink = DnsPacketSink { written += it },
+            processor = processor
+        )
+
+        loop.run()
+
+        assertEquals(1, resolverCalls)
+        assertEquals(1L, loop.processedPackets)
+        assertEquals(1L, loop.failedPackets)
+        assertEquals(1, written.size)
+        assertTrue(source.closed)
+        assertEquals(53, u16(written.single(), 20))
+        assertEquals(53000, u16(written.single(), 22))
+    }
+
+    @Test
+    fun rejectsSecondRunAttempt() {
+        val source = FakeSource(emptyList())
+        val loop = Ipv4UdpDnsPacketLoop(
+            source = source,
+            sink = DnsPacketSink { },
+            processor = Ipv4UdpDnsPacketProcessor(resolver = DnsPacketResolver { it })
+        )
+        loop.run()
+        try {
+            loop.run()
+            fail("Second run must be rejected")
+        } catch (_: IllegalStateException) {
+            // Expected: a packet source has exactly one owning reader.
+        }
+        assertTrue(source.closed)
+    }
+
+    @Test
+    fun stopClosesSourceAndRunExitsAfterCurrentRead() {
+        val source = FakeSource(emptyList())
+        val loop = Ipv4UdpDnsPacketLoop(
+            source = source,
+            sink = DnsPacketSink { throw AssertionError("No packet expected") },
+            processor = Ipv4UdpDnsPacketProcessor(resolver = DnsPacketResolver { it })
+        )
+
+        loop.stop()
+        loop.run()
+
+        assertTrue(source.closed)
+        assertEquals(0L, loop.processedPackets)
+    }
+
+    private class FakeSource(packets: List<ByteArray>) : DnsPacketSource {
+        private val queue = ArrayDeque(packets)
+        var closed = false
+            private set
+
+        override fun readPacket(): ByteArray? = if (closed) null else queue.removeFirstOrNull()
+        override fun close() { closed = true }
+    }
+
+    private fun makePacket(dns: ByteArray): ByteArray {
+        val packet = ByteArray(20 + 8 + dns.size)
+        packet[0] = 0x45
+        putU16(packet, 2, packet.size)
+        putU16(packet, 4, 0x1234)
+        putU16(packet, 6, 0x4000)
+        packet[8] = 64
+        packet[9] = 17
+        byteArrayOf(192.toByte(), 0, 2, 10).copyInto(packet, 12)
+        byteArrayOf(192.toByte(), 0, 2, 53).copyInto(packet, 16)
+        putU16(packet, 20, 53000)
+        putU16(packet, 22, 53)
+        putU16(packet, 24, 8 + dns.size)
+        dns.copyInto(packet, 28)
+        putU16(packet, 10, checksum(packet, 20))
+        return packet
+    }
+
+    private fun checksum(bytes: ByteArray, length: Int): Int {
+        var sum = 0L
+        for (i in 0 until length step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or
+                (bytes[i + 1].toInt() and 0xff)
+        }
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun putU16(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 8).toByte()
+        bytes[offset + 1] = value.toByte()
+    }
+
+    private fun u16(bytes: ByteArray, offset: Int): Int =
+        ((bytes[offset].toInt() and 0xff) shl 8) or (bytes[offset + 1].toInt() and 0xff)
+
+    private fun dnsQuery(): ByteArray = byteArrayOf(
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 'e'.code.toByte(), 'x'.code.toByte(), 'a'.code.toByte(),
+        'm'.code.toByte(), 'p'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+        0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+        0x00, 0x00, 0x01, 0x00, 0x01
+    )
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketProcessorTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3104 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Test
+
+class Ipv4UdpDnsPacketProcessorTest {
+    @Test
+    fun forwardsDnsPayloadAndBuildsReplyPacket() {
+        val queryDns = dnsQuery()
+        val expectedResponse = queryDns.copyOf().also {
+            it[2] = 0x81.toByte()
+            it[3] = 0x80.toByte()
+        }
+        var received: ByteArray? = null
+        val processor = Ipv4UdpDnsPacketProcessor(
+            resolver = DnsPacketResolver { query ->
+                received = query
+                expectedResponse
+            },
+            responseTtl = 42
+        )
+
+        val reply = processor.process(packet(queryDns))
+        assertArrayEquals(queryDns, received)
+        assertEquals(42, reply[8].toInt() and 0xff)
+        assertEquals(53, u16(reply, 20))
+        assertEquals(53000, u16(reply, 22))
+        assertArrayEquals(expectedResponse, reply.copyOfRange(28, reply.size))
+        assertEquals(0, checksum(reply, 0, 20))
+    }
+
+    @Test
+    fun rejectsInvalidPacketsBeforeCallingResolver() {
+        var called = false
+        val processor = Ipv4UdpDnsPacketProcessor(DnsPacketResolver {
+            called = true
+            it
+        })
+        val invalid = packet(dnsQuery()).also { it[8] = 0 }
+        assertThrows(IllegalArgumentException::class.java) {
+            processor.process(invalid)
+        }
+        assertEquals(false, called)
+    }
+
+    private fun packet(dns: ByteArray): ByteArray {
+        val result = ByteArray(20 + 8 + dns.size)
+        result[0] = 0x45
+        putU16(result, 2, result.size)
+        putU16(result, 4, 0x2468)
+        putU16(result, 6, 0x4000)
+        result[8] = 64
+        result[9] = 17
+        byteArrayOf(10, 0, 0, 2).copyInto(result, 12)
+        byteArrayOf(10, 0, 0, 1).copyInto(result, 16)
+        putU16(result, 20, 53000)
+        putU16(result, 22, 53)
+        putU16(result, 24, 8 + dns.size)
+        dns.copyInto(result, 28)
+        putU16(result, 10, checksum(result, 0, 20))
+        return result
+    }
+
+    private fun dnsQuery() = byteArrayOf(
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65,
+        0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01
+    )
+
+    private fun checksum(bytes: ByteArray, offset: Int, length: Int): Int {
+        var sum = 0L
+        var i = 0
+        while (i + 1 < length) {
+            sum += ((bytes[offset + i].toInt() and 0xff) shl 8) or
+                (bytes[offset + i + 1].toInt() and 0xff)
+            i += 2
+        }
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun u16(bytes: ByteArray, offset: Int): Int =
+        ((bytes[offset].toInt() and 0xff) shl 8) or (bytes[offset + 1].toInt() and 0xff)
+
+    private fun putU16(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 8).toByte()
+        bytes[offset + 1] = value.toByte()
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/NativeSocketProtectionTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 858 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class NativeSocketProtectionTest {
+
+    @Test
+    fun rejectsNegativeFileDescriptorWithoutCallingAndroid() {
+        var called = false
+
+        val result = NativeSocketProtection.protect(-1) {
+            called = true
+            true
+        }
+
+        assertFalse(result)
+        assertFalse(called)
+    }
+
+    @Test
+    fun returnsAndroidProtectionResult() {
+        assertTrue(NativeSocketProtection.protect(42) { it == 42 })
+        assertFalse(NativeSocketProtection.protect(42) { false })
+    }
+
+    @Test
+    fun failsClosedWhenProtectionCallbackThrows() {
+        val result = NativeSocketProtection.protect(42) {
+            throw IllegalStateException("protection failed")
+        }
+
+        assertFalse(result)
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/NativeTunnelRunnerTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3939 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+
+class NativeTunnelRunnerTest {
+    @Test
+    fun keepsTunDescriptorOpenUntilNativeRunReturns() {
+        val executor = Executors.newSingleThreadExecutor()
+        val nativeStarted = CountDownLatch(1)
+        val allowNativeReturn = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val order = mutableListOf<String>()
+        try {
+            val runner = NativeTunnelRunner(
+                executor = executor,
+                runEngine = { _, _, _ ->
+                    synchronized(order) { order.add("native-started") }
+                    nativeStarted.countDown()
+                    assertTrue(allowNativeReturn.await(2, TimeUnit.SECONDS))
+                    synchronized(order) { order.add("native-returned") }
+                    0
+                },
+                stopEngine = { 0 },
+                onFinished = { finished.countDown() }
+            )
+
+            assertTrue(runner.start("args", 1500) {
+                synchronized(order) { order.add("tun-closed") }
+            })
+            assertTrue(nativeStarted.await(2, TimeUnit.SECONDS))
+            assertTrue(runner.isActive())
+            allowNativeReturn.countDown()
+            assertTrue(finished.await(2, TimeUnit.SECONDS))
+
+            assertEquals(
+                listOf("native-started", "native-returned", "tun-closed"),
+                synchronized(order) { order.toList() }
+            )
+            assertFalse(runner.isActive())
+        } finally {
+            allowNativeReturn.countDown()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun rejectsSecondStartAndForwardsStopRequest() {
+        val executor = Executors.newSingleThreadExecutor()
+        val nativeStarted = CountDownLatch(1)
+        val allowNativeReturn = CountDownLatch(1)
+        val stopCalls = AtomicInteger()
+        val finished = CountDownLatch(1)
+        try {
+            val runner = NativeTunnelRunner(
+                executor = executor,
+                runEngine = { _, _, _ ->
+                    nativeStarted.countDown()
+                    allowNativeReturn.await(2, TimeUnit.SECONDS)
+                    0
+                },
+                stopEngine = { stopCalls.incrementAndGet(); 0 },
+                onFinished = { finished.countDown() }
+            )
+            assertTrue(runner.start("args", 1500) {})
+            assertTrue(nativeStarted.await(2, TimeUnit.SECONDS))
+            assertFalse(runner.start("other", 1500) {})
+            assertTrue(runner.stop())
+            assertEquals(1, stopCalls.get())
+            allowNativeReturn.countDown()
+            assertTrue(finished.await(2, TimeUnit.SECONDS))
+        } finally {
+            allowNativeReturn.countDown()
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun closesDescriptorEvenWhenNativeRunThrows() {
+        val executor = Executors.newSingleThreadExecutor()
+        val finished = CountDownLatch(1)
+        val closed = AtomicInteger()
+        val result = AtomicInteger(0)
+        try {
+            val runner = NativeTunnelRunner(
+                executor = executor,
+                runEngine = { _, _, _ -> error("native unavailable") },
+                stopEngine = { 0 },
+                onFinished = { result.set(it); finished.countDown() }
+            )
+            assertTrue(runner.start("args", 1500) { closed.incrementAndGet() })
+            assertTrue(finished.await(2, TimeUnit.SECONDS))
+            assertEquals(1, closed.get())
+            assertEquals(NativeTunnelRunner.NATIVE_RUN_EXCEPTION, result.get())
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/TcpFlowLifecycleTrackerTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 8940 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class TcpFlowLifecycleTrackerTest {
+    @Test
+    fun tracksThreeWayHandshakeWithoutClaimingToImplementTcp() {
+        val tracker = TcpFlowLifecycleTracker()
+        val syn = parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN))
+        val first = tracker.observe(syn, TcpFlowLifecycleTracker.Direction.OUTBOUND, 10)
+        assertEquals(TcpFlowLifecycleTracker.State.SYN_SENT, (first as TcpFlowLifecycleTracker.ObserveResult.Updated).snapshot.state)
+
+        val synAck = parse(tcpPacket(
+            outbound = false,
+            flags = Ipv4TcpPacketParser.FLAG_SYN or Ipv4TcpPacketParser.FLAG_ACK
+        ))
+        val second = tracker.observe(synAck, TcpFlowLifecycleTracker.Direction.INBOUND, 20)
+        assertEquals(TcpFlowLifecycleTracker.State.SYN_ACK_RECEIVED, (second as TcpFlowLifecycleTracker.ObserveResult.Updated).snapshot.state)
+
+        val ack = parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_ACK))
+        val third = tracker.observe(ack, TcpFlowLifecycleTracker.Direction.OUTBOUND, 30)
+        assertEquals(TcpFlowLifecycleTracker.State.ESTABLISHED, (third as TcpFlowLifecycleTracker.ObserveResult.Updated).snapshot.state)
+        assertEquals(3L, third.snapshot.packetsSeen)
+    }
+
+    @Test
+    fun tracksHalfCloseAndBothFinObservations() {
+        val tracker = TcpFlowLifecycleTracker()
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 1
+        )
+        val localFin = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_FIN or Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 2
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        assertEquals(TcpFlowLifecycleTracker.State.LOCAL_HALF_CLOSED, localFin.snapshot.state)
+
+        val remoteFin = tracker.observe(
+            parse(tcpPacket(outbound = false, flags = Ipv4TcpPacketParser.FLAG_FIN or Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.INBOUND, 3
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        assertEquals(TcpFlowLifecycleTracker.State.CLOSING, remoteFin.snapshot.state)
+    }
+
+    @Test
+    fun rstClosesFlowAndPruneRemovesAfterRetention() {
+        val tracker = TcpFlowLifecycleTracker(closedRetentionMillis = 100)
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 100
+        )
+        val closed = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_RST)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 120
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        assertEquals(TcpFlowLifecycleTracker.State.CLOSED, closed.snapshot.state)
+        assertEquals(0, tracker.prune(219))
+        assertEquals(1, tracker.prune(220))
+        assertTrue(tracker.snapshot().isEmpty())
+    }
+
+    @Test
+    fun closingFlowsArePrunedAfterRetention() {
+        val tracker = TcpFlowLifecycleTracker(closedRetentionMillis = 50)
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 100
+        )
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_FIN or Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 110
+        )
+        val closing = tracker.observe(
+            parse(tcpPacket(outbound = false, flags = Ipv4TcpPacketParser.FLAG_FIN or Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.INBOUND, 120
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        assertEquals(TcpFlowLifecycleTracker.State.CLOSING, closing.snapshot.state)
+        assertEquals(0, tracker.prune(169))
+        assertEquals(1, tracker.prune(170))
+        assertTrue(tracker.snapshot().isEmpty())
+    }
+
+    @Test
+    fun newSynReplacesTerminalFlowWhenFourTupleIsReused() {
+        val tracker = TcpFlowLifecycleTracker(closedRetentionMillis = 10_000)
+        val first = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 10
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_RST)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 11
+        )
+
+        val second = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 12
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+
+        assertEquals(first.snapshot.key, second.snapshot.key)
+        assertEquals(12L, second.snapshot.createdAtMillis)
+        assertEquals(1L, second.snapshot.packetsSeen)
+        assertEquals(TcpFlowLifecycleTracker.State.SYN_SENT, second.snapshot.state)
+    }
+
+    @Test
+    fun delayedObservationDoesNotMoveLastSeenTimestampBackwards() {
+        val tracker = TcpFlowLifecycleTracker()
+        tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 20
+        )
+        val result = tracker.observe(
+            parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_ACK)),
+            TcpFlowLifecycleTracker.Direction.OUTBOUND, 10
+        ) as TcpFlowLifecycleTracker.ObserveResult.Updated
+        assertEquals(20L, result.snapshot.lastSeenAtMillis)
+    }
+
+    @Test
+    fun enforcesCapacityAndRejectsUnsolicitedInitialAck() {
+        val tracker = TcpFlowLifecycleTracker(maxFlows = 1)
+        val ack = parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_ACK))
+        assertEquals(
+            TcpFlowLifecycleTracker.ObserveResult.InvalidInitialPacket,
+            tracker.observe(ack, TcpFlowLifecycleTracker.Direction.OUTBOUND, 1)
+        )
+
+        val syn = parse(tcpPacket(flags = Ipv4TcpPacketParser.FLAG_SYN))
+        tracker.observe(syn, TcpFlowLifecycleTracker.Direction.OUTBOUND, 2)
+        val secondSyn = parse(tcpPacket(
+            sourcePort = 43121,
+            flags = Ipv4TcpPacketParser.FLAG_SYN
+        ))
+        assertEquals(
+            TcpFlowLifecycleTracker.ObserveResult.CapacityReached,
+            tracker.observe(secondSyn, TcpFlowLifecycleTracker.Direction.OUTBOUND, 3)
+        )
+    }
+
+    private fun parse(bytes: ByteArray) = Ipv4TcpPacketParser.parse(bytes)
+
+    private fun tcpPacket(
+        outbound: Boolean = true,
+        sourcePort: Int = 43120,
+        flags: Int
+    ): ByteArray {
+        val bytes = ByteArray(40)
+        bytes[0] = 0x45
+        put16(bytes, 2, bytes.size)
+        put16(bytes, 4, 0x1234)
+        bytes[8] = 64
+        bytes[9] = 6
+        val local = byteArrayOf(10, 0, 0, 2)
+        val remote = byteArrayOf(203.toByte(), 0, 113, 10)
+        (if (outbound) local else remote).copyInto(bytes, 12)
+        (if (outbound) remote else local).copyInto(bytes, 16)
+
+        val tcp = 20
+        put16(bytes, tcp, if (outbound) sourcePort else 443)
+        put16(bytes, tcp + 2, if (outbound) 443 else sourcePort)
+        put32(bytes, tcp + 4, 100L)
+        put32(bytes, tcp + 8, 200L)
+        bytes[tcp + 12] = ((5 shl 4) or ((flags ushr 8) and 1)).toByte()
+        bytes[tcp + 13] = flags.toByte()
+        put16(bytes, tcp + 14, 4096)
+        put16(bytes, tcp + 16, tcpChecksum(bytes, tcp, 20))
+        fixIpChecksum(bytes)
+        return bytes
+    }
+
+    private fun tcpChecksum(bytes: ByteArray, offset: Int, length: Int): Int {
+        var sum = 0L
+        for (i in 12 until 20 step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or (bytes[i + 1].toInt() and 0xff)
+        }
+        sum += 6
+        sum += length
+        for (i in offset until offset + length step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or (bytes[i + 1].toInt() and 0xff)
+        }
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun fixIpChecksum(bytes: ByteArray) {
+        bytes[10] = 0
+        bytes[11] = 0
+        var sum = 0
+        for (i in 0 until 20 step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or (bytes[i + 1].toInt() and 0xff)
+        }
+        while ((sum ushr 16) != 0) sum = (sum and 0xffff) + (sum ushr 16)
+        put16(bytes, 10, sum.inv() and 0xffff)
+    }
+
+    private fun put16(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 8).toByte()
+        bytes[offset + 1] = value.toByte()
+    }
+
+    private fun put32(bytes: ByteArray, offset: Int, value: Long) {
+        put16(bytes, offset, (value ushr 16).toInt() and 0xffff)
+        put16(bytes, offset + 2, value.toInt() and 0xffff)
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/Tun2ProxyCommandBuilderTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 2434 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.ProxyProtocol
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class Tun2ProxyCommandBuilderTest {
+    @Test
+    fun buildsHttpConnectCommandWithOwnedTunDescriptor() {
+        val profile = ProxyProfile(
+            name = "HTTP upstream",
+            host = "proxy.example",
+            port = 8080,
+            protocol = ProxyProtocol.HTTP_CONNECT
+        )
+
+        val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 42)
+
+        assertTrue(command!!.startsWith("'tun2proxy-bin' "))
+        assertTrue(command.contains("'--tun-fd' '42'"))
+        assertTrue(command.contains("'--close-fd-on-drop' 'false'"))
+        assertTrue(command.contains("'--proxy' 'http://proxy.example:8080'"))
+        assertTrue(command.contains("'--dns' 'virtual'"))
+        assertTrue(command.contains("'--ipv6-enabled'"))
+    }
+
+    @Test
+    fun percentEncodesCredentialsAndBracketsIpv6ProxyHost() {
+        val profile = ProxyProfile(
+            name = "SOCKS upstream",
+            host = "2001:db8::10",
+            port = 1080,
+            protocol = ProxyProtocol.SOCKS5,
+            username = "user name",
+            password = "p@ss:/#?"
+        )
+
+        val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 9)
+
+        assertTrue(command!!.contains("socks5://user%20name:p%40ss%3A%2F%23%3F@[2001:db8::10]:1080"))
+        assertTrue(!command.contains("p@ss:/#?"))
+    }
+
+    @Test
+    fun usesTcpDnsForwardingWhenVirtualRemoteDnsIsDisabled() {
+        val profile = ProxyProfile(
+            name = "HTTP",
+            host = "proxy.example",
+            port = 8080,
+            protocol = ProxyProtocol.HTTP_CONNECT,
+            remoteDns = false
+        )
+
+        val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 8)
+
+        assertTrue(command!!.contains("'--dns' 'over-tcp'"))
+    }
+
+    @Test
+    fun rejectsInvalidDescriptorAndMtu() {
+        val profile = ProxyProfile(
+            name = "SOCKS",
+            host = "127.0.0.1",
+            port = 1080,
+            protocol = ProxyProtocol.SOCKS5
+        )
+
+        assertNull(Tun2ProxyCommandBuilder.build(profile, tunFd = -1))
+        assertNull(Tun2ProxyCommandBuilder.build(profile, tunFd = 3, mtu = 500))
+        assertNull(Tun2ProxyCommandBuilder.build(profile, tunFd = 3, mtu = 65536))
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: build.gradle.kts
+المجلد: جذر المشروع
+وظيفة الملف: إعدادات بناء أو ملف مصدر/توثيق للمشروع.
+الحجم الأصلي: 217 بايت
+==============================================================================
+plugins {
+    id("com.android.application") version "8.7.3" apply false
+    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+}
+
