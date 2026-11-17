@@ -543,82 +543,6 @@ private fun Dashboard(store: ProxyProfileStore) {
                 }
             }
 
-            Card(
-                modifier = Modifier.fillMaxWidth().onGloballyPositioned { updateSectionOffset = it.positionInParent().y.toInt() },
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Panel)
-            ) {
-                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(tx("APP UPDATES"), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-                            Text(
-                                when {
-                                    updateChecking -> tx("Checking GitHub Releases…")
-                                    updateDownloading -> tx("Downloading update…")
-                                    downloadedApk != null -> tx("Update downloaded and ready to install")
-                                    updateInfo != null -> "${tx("New version available")}: ${updateInfo?.versionName}"
-                                    updateError.isNotBlank() -> tx("Update check needs attention")
-                                    else -> tx("You're using the latest version")
-                                },
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        TextButton(onClick = { checkForAppUpdate() }, enabled = !updateChecking && !updateDownloading) {
-                            Text(tx("Check"), color = Accent)
-                        }
-                    }
-                    updateInfo?.let { info ->
-                        Text(info.title, color = Muted, fontSize = 11.sp)
-                        if (info.notes.isNotBlank()) {
-                            Text(info.notes.take(240), color = Muted, fontSize = 10.sp, lineHeight = 14.sp, maxLines = 4)
-                        }
-                    }
-                    if (updateDownloading) {
-                        LinearProgressIndicator(
-                            progress = updateProgress,
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Accent,
-                            trackColor = Color(0xFF26344D)
-                        )
-                        Text(
-                            if (updateTotalBytes > 0L) "${(updateProgress * 100).toInt()}% · ${formatUpdateBytes(updateDownloadedBytes)} / ${formatUpdateBytes(updateTotalBytes)}"
-                            else formatUpdateBytes(updateDownloadedBytes),
-                            color = Muted,
-                            fontSize = 11.sp
-                        )
-                    }
-                    if (updateError.isNotBlank()) {
-                        Text(tx(updateError), color = Color(0xFFFF8B8B), fontSize = 11.sp)
-                    }
-                    if (downloadedApk != null) {
-                        Button(
-                            onClick = { installAppUpdate(downloadedApk!!) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
-                        ) { Text(tx("Install update")) }
-                    } else if (updateInfo != null) {
-                        Button(
-                            onClick = { downloadAppUpdate() },
-                            enabled = !updateDownloading,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
-                        ) {
-                            Text(tx(if (updateDownloading) "Downloading…" else "Download update"))
-                        }
-                    }
-                }
-            }
-
-            if (credentialWarning) {
-                InfoCard(
-                    "Saved credentials need attention",
-                    "Android could not read or decrypt saved proxy profile data. Existing data is protected from being overwritten. Restore the original app data and Android Keystore state before editing or saving profiles."
-                )
-            }
-
             Row(modifier = Modifier.onGloballyPositioned { profilesSectionOffset = it.positionInParent().y.toInt() }, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(tx("PROXY PROFILES"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -822,28 +746,6 @@ private fun Dashboard(store: ProxyProfileStore) {
                 Text(tx(notice), color = Accent, fontSize = 12.sp)
             }
 
-            Card(
-                modifier = Modifier.fillMaxWidth().clickable { showAppsPage = true },
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Panel)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF20344A), modifier = Modifier.size(52.dp)) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text("▦", color = Accent, fontSize = 27.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(tx("Apps & routing"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                        Text("${installedApps.size} ${tx("installed apps")} · ${tx("Manage app routes")}", color = Muted, fontSize = 11.sp)
-                    }
-                    Text("›", color = Accent, fontSize = 30.sp, fontWeight = FontWeight.Light)
-                }
-            }
             Spacer(Modifier.height(12.dp))
             Text(tx("ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL"), color = Muted, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         }
