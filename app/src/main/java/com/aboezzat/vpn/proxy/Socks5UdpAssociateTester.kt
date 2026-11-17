@@ -108,14 +108,14 @@ object Socks5UdpAssociateTester {
                     if (transactionId != DNS_TRANSACTION_ID || (dnsPayload[2].toInt() and 0x80) == 0) {
                         throw IOException("UDP relay response did not match the DNS test request.")
                     }
-                }
 
-                ProxyUdpTestResult(
-                    true,
-                    "SOCKS5 UDP datagram round-trip verified with a DNS response.",
-                    effectiveRelayAddress.hostAddress ?: relayHost,
-                    relayPort
-                )
+                    ProxyUdpTestResult(
+                        true,
+                        "SOCKS5 UDP datagram round-trip verified with a DNS response.",
+                        effectiveRelayAddress.hostAddress ?: relayHost,
+                        relayPort
+                    )
+                }
             }
         } catch (_: java.net.SocketTimeoutException) {
             ProxyUdpTestResult(false, "SOCKS5 UDP relay timed out: no DNS response was received.")
