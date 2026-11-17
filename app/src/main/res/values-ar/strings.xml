@@ -1,3 +1,18 @@
 <resources>
     <string name="app_name">أبو عزت VPN</string>
+    <string name="proxy_browser_title">متصفح البروكسي فقط</string>
+    <string name="proxy_browser_address">العنوان</string>
+    <string name="proxy_browser_go">اذهب</string>
+    <string name="proxy_browser_back">رجوع</string>
+    <string name="proxy_browser_forward">التالي</string>
+    <string name="proxy_browser_reload">إعادة تحميل</string>
+    <string name="proxy_browser_close">إغلاق</string>
+    <string name="proxy_browser_active">البروكسي نشط · بدون VPN</string>
+    <string name="proxy_browser_scope">يُستخدم البروكسي داخل هذا المتصفح فقط. التطبيقات الأخرى لا تتأثر.</string>
+    <string name="proxy_browser_unsupported">إصدار WebView في الجهاز لا يدعم إعداد البروكسي.</string>
+    <string name="proxy_browser_invalid_profile">ملف البروكسي المحدد غير صالح أو يتطلب مصادقة.</string>
+    <string name="proxy_browser_vpn_running">افصل نفق أبو عزت VPN قبل فتح وضع البروكسي فقط.</string>
+    <string name="proxy_browser_apply_failed">تعذر تطبيق إعدادات البروكسي.</string>
+    <string name="proxy_browser_loading">جارٍ التحميل عبر البروكسي…</string>
+    <string name="proxy_browser_loaded">تم تحميل الصفحة عبر البروكسي.</string>
 </resources>
