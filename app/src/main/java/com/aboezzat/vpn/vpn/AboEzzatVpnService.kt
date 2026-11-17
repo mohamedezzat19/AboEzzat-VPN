@@ -14,6 +14,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.ResultReceiver
 import android.util.Log
+import com.aboezzat.vpn.ConnectionDiagnostics
 import com.aboezzat.vpn.proxy.ProxyConnectionTester
 import com.aboezzat.vpn.proxy.ProxyTestRequestParser
 import com.aboezzat.vpn.proxy.ProxyProfile
@@ -78,10 +79,12 @@ class AboEzzatVpnService : VpnService() {
                 START_NOT_STICKY
             }
             ACTION_START_TUNNEL -> {
+                ConnectionDiagnostics.add(this, "Tunnel start requested")
                 startTunnel(intent, startId)
                 START_NOT_STICKY
             }
             ACTION_STOP_TUNNEL -> {
+                ConnectionDiagnostics.add(this, "Tunnel stop requested")
                 stopTunnel(intent, startId)
                 START_NOT_STICKY
             }
@@ -270,6 +273,7 @@ class AboEzzatVpnService : VpnService() {
 
         // Only report the tunnel as running after the native worker accepted the session.
         tunnelRunning = true
+        ConnectionDiagnostics.add(this, "Tunnel worker accepted; direct bypass apps=" + directBypassCount)
         receiver?.send(
             RESULT_STARTED,
             Bundle().apply {
@@ -508,6 +512,8 @@ class AboEzzatVpnService : VpnService() {
     fun protectUpstreamSocket(socket: Socket): Boolean {
         val allowed = protect(socket)
         if (!allowed) {
+            ConnectionDiagnostics.add(this, "VpnService.protect(DatagramSocket) returned false; closed=" + socket.isClosed + ", bound=" + socket.isBound + ", thread=" + Thread.currentThread().name)
+            ConnectionDiagnostics.add(this, "VpnService.protect(Socket) returned false; closed=" + socket.isClosed + ", connected=" + socket.isConnected + ", bound=" + socket.isBound + ", thread=" + Thread.currentThread().name)
             Log.e(
                 SOCKET_PROTECT_LOG_TAG,
                 "VpnService.protect(Socket) returned false: closed=${socket.isClosed}, " +
@@ -534,8 +540,11 @@ class AboEzzatVpnService : VpnService() {
 
     /** Synchronous JNI callback. False is a hard failure for native callers. */
     @androidx.annotation.Keep
-    fun protectNativeSocket(fd: Int): Boolean =
-        NativeSocketProtection.protect(fd, ::protect)
+    fun protectNativeSocket(fd: Int): Boolean {
+        val allowed = NativeSocketProtection.protect(fd, ::protect)
+        if (!allowed) ConnectionDiagnostics.add(this, "Native VpnService.protect(fd) returned false; fd=" + fd)
+        return allowed
+    }
 
     companion object {
         private const val SOCKET_PROTECT_LOG_TAG = "AboEzzatSocketProtect"
