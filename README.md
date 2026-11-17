@@ -27,7 +27,7 @@ The authoritative findings and staged plan are in [docs/NETWORKING_AUDIT_AND_ROA
 
 ## Recovery plan
 
-1. **Proxy-only baseline:** verify the upstream proxy without starting the TUN: TCP CONNECT, SOCKS5 CONNECT, authentication, DNS, and real UDP ASSOCIATE responses. This validates the proxy path, not all Android apps.
+1. **Proxy-only baseline:** use the in-app WebView browser with AndroidX ProxyController (HTTP or SOCKS proxy) without starting the TUN, then verify SOCKS5 CONNECT, DNS, and real UDP ASSOCIATE responses. The WebView proxy override applies only to WebViews in this app; other apps are unaffected.
 2. **Proxy + VPN:** after the proxy baseline passes, route device traffic through the TUN and verify DNS, TCP, UDP/QUIC, IPv4/IPv6, session cleanup, and network changes.
 3. **Country/egress selection:** only after the first two stages are stable, add an external egress VPN or proxy endpoint in the selected country and verify the public exit IP.
 
