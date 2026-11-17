@@ -532,13 +532,35 @@ where
                 }
                 let session_count = SessionCountGuard::new(task_count.clone());
                 let info = SessionInfo::new(tcp.local_addr(), tcp.peer_addr(), IpProtocol::Tcp);
-                if info.dst.port() == DNS_PORT
-                    && matches!(args.dns, ArgDns::Virtual | ArgDns::OverTcp)
-                {
-                    // TCP DNS (including truncation fallback) always reaches the
-                    // real resolver through the proxy. Real A/AAAA answers are
-                    // safe here because subsequent connections are still proxied
-                    // by destination IP; UDP A/AAAA keeps virtual hostname mapping.
+                if info.dst.port() == DNS_PORT && args.dns == ArgDns::Virtual {
+                    let dns_info = normalize_dns_destination(info, dns_addr);
+                    let manager = mgr.clone();
+                    let queue = socket_queue.clone();
+                    let dns = virtual_dns.clone();
+                    session_tasks.spawn(async move {
+                        let _session_count = session_count;
+                        if let Some(dns) = dns {
+                            if let Err(err) = handle_virtual_dns_tcp_session(
+                                tcp,
+                                dns,
+                                dns_info,
+                                manager,
+                                queue,
+                                ipv6_enabled,
+                            )
+                            .await
+                            {
+                                log::error!("{dns_info} virtual DNS-over-TCP error \"{err}\"");
+                            }
+                        } else {
+                            log::error!("{dns_info} virtual DNS mode has no DNS mapping table");
+                        }
+                    });
+                    continue;
+                }
+                if info.dst.port() == DNS_PORT && args.dns == ArgDns::OverTcp {
+                    // Remote-DNS mode sends TCP DNS directly to the resolver
+                    // through the configured proxy.
                     let dns_info = normalize_dns_destination(info, dns_addr);
                     let proxy_handler = match mgr.new_proxy_handler(dns_info, None, false).await {
                         Ok(proxy_handler) => proxy_handler,
@@ -719,6 +741,68 @@ fn normalize_dns_destination(mut info: SessionInfo, dns_addr: IpAddr) -> Session
         info.dst.set_ip(dns_addr);
     }
     info
+}
+
+fn decode_dns_tcp_queries(buffer: &mut Vec<u8>, received: &[u8]) -> crate::Result<Vec<Vec<u8>>> {
+    buffer.extend_from_slice(received);
+
+    let mut consumed = 0;
+    let mut queries = Vec::new();
+    while buffer.len().saturating_sub(consumed) >= 2 {
+        let message_len = u16::from_be_bytes([buffer[consumed], buffer[consumed + 1]]) as usize;
+        if message_len == 0 {
+            return Err("DNS-over-TCP query has an empty frame".into());
+        }
+        let frame_end = consumed + 2 + message_len;
+        if buffer.len() < frame_end {
+            break;
+        }
+        queries.push(buffer[consumed + 2..frame_end].to_vec());
+        consumed = frame_end;
+    }
+
+    if consumed > 0 {
+        buffer.drain(..consumed);
+    }
+    Ok(queries)
+}
+
+async fn handle_virtual_dns_tcp_session(
+    mut tcp: IpStackTcpStream,
+    dns: Arc<Mutex<VirtualDns>>,
+    session_info: SessionInfo,
+    manager: Arc<dyn ProxyHandlerManager>,
+    socket_queue: Option<Arc<SocketQueue>>,
+    ipv6_enabled: bool,
+) -> crate::Result<()> {
+    let mut buf = [0_u8; 8192];
+    let mut pending = Vec::new();
+    loop {
+        let len = tcp.read(&mut buf).await?;
+        if len == 0 {
+            break;
+        }
+        for query in decode_dns_tcp_queries(&mut pending, &buf[..len])? {
+            let synthetic_query = dns.lock().await.is_synthetic_query(&query)?;
+            let response = if synthetic_query {
+                let (response, qname, ip) = dns.lock().await.generate_query(&query)?;
+                log::debug!("Virtual DNS-over-TCP query: {qname} -> {ip}");
+                response
+            } else {
+                let mut dns_info = session_info;
+                dns_info.protocol = IpProtocol::Tcp;
+                let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
+                let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
+                let response = forward_dns_query_over_tcp(&mut server, &query, ipv6_enabled).await?;
+                log::debug!("Virtual DNS-over-TCP forwarded non-A/AAAA query through proxy: {session_info}");
+                response
+            };
+            let response_len = u16::try_from(response.len())?;
+            tcp.write_all(&response_len.to_be_bytes()).await?;
+            tcp.write_all(&response).await?;
+        }
+    }
+    Ok(())
 }
 
 async fn forward_dns_query_over_tcp<S>(

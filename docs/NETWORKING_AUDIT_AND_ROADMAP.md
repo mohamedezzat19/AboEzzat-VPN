@@ -19,7 +19,7 @@ Stop speculative one-off patches. Establish one reproducible data path, test eac
 
 ## Confirmed code gaps
 
-1. **Virtual DNS record coverage:** the virtual DNS generator creates synthetic answers for A and AAAA. Other record types currently become empty responses. DNS-over-TCP in virtual mode was also intercepted locally, so TCP fallback did not solve unsupported record types. The next DNS change must preserve virtual A/AAAA mapping while forwarding unsupported queries through the configured resolver over the proxy.
+1. **Virtual DNS record coverage:** the virtual DNS generator creates synthetic answers for A and AAAA. Other record types previously became empty responses. The current hybrid-DNS change preserves synthetic A/AAAA mapping and forwards unsupported UDP/TCP queries through the configured resolver over the proxy.
 2. **TCP session cleanup:** the TCP relay used `tokio::join!` for both directions. If one direction errors while the other remains blocked, the session can remain alive unnecessarily. It should preserve normal half-close behavior but cancel the opposite direction on error.
 3. **Unbounded upstream setup:** TCP connect and HTTP/SOCKS handshake did not have explicit deadlines in the native data path. A stalled proxy can consume a session slot. The current hardening change adds bounded connect and handshake timeouts.
 4. **Kotlin socket protection order:** helper sockets were passed to `VpnService.protect()` before binding. On Android an unbound Java socket may not yet have an allocated native descriptor. The helper paths now bind first, protect second, and connect third.

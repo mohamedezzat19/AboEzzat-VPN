@@ -17,7 +17,7 @@ Android client for sending traffic from a second phone through an upstream proxy
 ## Current limitations being audited
 
 - The app does not yet provide a complete standalone, device-wide proxy-only mode. Its direct proxy checks are preflight tests; Android-wide app capture requires the VPN stage.
-- Virtual DNS synthesizes A/AAAA records. Other DNS record types need a remote fallback instead of an empty local response.
+- Virtual DNS synthesizes A/AAAA records and forwards other DNS record types (including TCP fallback) through the upstream proxy.
 - A successful SOCKS5 UDP DNS test proves that one DNS datagram received an answer; it does not prove every UDP application or QUIC flow works.
 - The current TUN MTU is 1500 and the engine's default maximum concurrent sessions is 200. Neither should be changed without measurements on the actual hotspot/MikroTik path.
 - Non-TCP/UDP IP transports are not forwarded by the current userspace engine.
