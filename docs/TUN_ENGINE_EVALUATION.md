@@ -1,3 +1,5 @@
+> **Historical evaluation (2026-11-15).** HevSocks5Tunnel was selected as a proof-of-concept candidate at that point, but the current main branch subsequently integrated the pinned tun2proxy engine. This file is retained as decision history, not as the current architecture. See [NETWORKING_AUDIT_AND_ROADMAP.md](NETWORKING_AUDIT_AND_ROADMAP.md).
+
 # TUN Engine Evaluation — 2026-11-15
 
 ## Decision status

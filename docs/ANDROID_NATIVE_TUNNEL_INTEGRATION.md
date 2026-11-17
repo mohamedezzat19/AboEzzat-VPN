@@ -1,3 +1,5 @@
+> **Historical snapshot — superseded.** This document records the pre-integration research stage. The current main branch now establishes the Android TUN and runs the pinned tun2proxy engine. Use [NETWORKING_AUDIT_AND_ROADMAP.md](NETWORKING_AUDIT_AND_ROADMAP.md) and [native/tun2proxy/UPSTREAM.md](../native/tun2proxy/UPSTREAM.md) for current status.
+
 # Android native tunnel integration — verified design notes
 
 Status: research/design only. This document does not claim that the native engine is integrated or that a VPN tunnel is working.

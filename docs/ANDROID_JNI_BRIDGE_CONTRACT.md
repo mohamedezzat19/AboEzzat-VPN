@@ -1,3 +1,5 @@
+> **Historical snapshot — superseded.** The JNI bridge and patched native engine described here are now linked into the app. The old statement that the engine is not yet shipped is no longer current. Use [NETWORKING_AUDIT_AND_ROADMAP.md](NETWORKING_AUDIT_AND_ROADMAP.md) and [native/tun2proxy/UPSTREAM.md](../native/tun2proxy/UPSTREAM.md) for current status.
+
 # App-owned JNI bridge contract
 
 Status: JNI callback bridge source and CMake target are now present in the app. The patched tun2proxy engine is not yet linked or shipped.

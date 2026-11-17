@@ -22,6 +22,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     os::fd::AsRawFd,
     sync::Arc,
+    time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -68,6 +69,8 @@ mod virtual_dns;
 pub mod win_svc;
 
 const DNS_PORT: u16 = 53;
+const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const PROXY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(
@@ -351,6 +354,57 @@ async fn create_udp_stream(socket_queue: &Option<Arc<SocketQueue>>, peer: Socket
         }
     }
 }
+
+async fn open_proxy_connection(
+    socket_queue: &Option<Arc<SocketQueue>>,
+    proxy_handler: Arc<Mutex<dyn ProxyHandler>>,
+) -> crate::Result<(TcpStream, Option<SocketAddr>)> {
+    open_proxy_connection_with_timeouts(
+        socket_queue,
+        proxy_handler,
+        PROXY_CONNECT_TIMEOUT,
+        PROXY_HANDSHAKE_TIMEOUT,
+    )
+    .await
+}
+
+async fn open_proxy_connection_with_timeouts(
+    socket_queue: &Option<Arc<SocketQueue>>,
+    proxy_handler: Arc<Mutex<dyn ProxyHandler>>,
+    connect_timeout: Duration,
+    handshake_timeout: Duration,
+) -> crate::Result<(TcpStream, Option<SocketAddr>)> {
+    let server_addr = { proxy_handler.lock().await.get_server_addr() };
+    let mut server = tokio::time::timeout(
+        connect_timeout,
+        create_tcp_stream(socket_queue, server_addr),
+    )
+    .await
+    .map_err(|_| {
+        std::io::Error::new(
+            ErrorKind::TimedOut,
+            format!("Timed out connecting to upstream proxy {server_addr}"),
+        )
+    })??;
+
+    let udp_addr = tokio::time::timeout(
+        handshake_timeout,
+        handle_proxy_session(&mut server, proxy_handler),
+    )
+    .await
+    .map_err(|_| {
+        std::io::Error::new(
+            ErrorKind::TimedOut,
+            format!(
+                "Upstream proxy handshake timed out after {} ms",
+                handshake_timeout.as_millis()
+            ),
+        )
+    })??;
+
+    Ok((server, udp_addr))
+}
+
 
 /// Run the proxy server
 /// # Arguments
@@ -766,25 +820,29 @@ async fn handle_tcp_session(
 ) -> crate::Result<()> {
     let (session_info, server_addr) = {
         let handler = proxy_handler.lock().await;
-
         (handler.get_session_info(), handler.get_server_addr())
     };
 
-    let mut server = create_tcp_stream(&socket_queue, server_addr).await?;
-
     log::info!("TCP flow {session_info}: opening upstream proxy socket to {server_addr}");
-
-    if let Err(error) = handle_proxy_session(&mut server, proxy_handler).await {
-        log::warn!("TCP flow {session_info}: upstream proxy CONNECT failed: {error}");
-        tcp_stack.shutdown().await?;
-        return Err(error);
-    }
+    let (server, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
+        Ok(connection) => connection,
+        Err(error) => {
+            log::warn!("TCP flow {session_info}: upstream proxy connect/handshake failed: {error}");
+            if let Err(shutdown_error) = tcp_stack.shutdown().await {
+                log::debug!("TCP flow {session_info}: shutdown after proxy failure: {shutdown_error}");
+            }
+            return Err(error);
+        }
+    };
     log::info!("TCP flow {session_info}: upstream proxy CONNECT established; starting bidirectional relay");
 
     let (mut t_rx, mut t_tx) = tokio::io::split(tcp_stack);
     let (mut s_rx, mut s_tx) = tokio::io::split(server);
 
-    let (client_to_proxy, proxy_to_client) = tokio::join!(
+    // Preserve TCP half-close semantics on normal EOF, but cancel the opposite
+    // relay immediately if either direction errors. join! could wait forever
+    // for the other direction and retain a dead session until its idle timeout.
+    let relay_result = tokio::try_join!(
         async move {
             let result = copy_and_record_traffic(&mut t_rx, &mut s_tx, true).await;
             if let Err(error) = s_tx.shutdown().await {
@@ -801,18 +859,16 @@ async fn handle_tcp_session(
         },
     );
 
-    match &client_to_proxy {
-        Ok(bytes) => log::info!("TCP flow {session_info}: client -> proxy finished ({bytes} bytes)"),
-        Err(error) => log::warn!("TCP flow {session_info}: client -> proxy relay failed: {error}"),
-    }
-    match &proxy_to_client {
-        Ok(bytes) => log::info!("TCP flow {session_info}: proxy -> client finished ({bytes} bytes)"),
-        Err(error) => log::warn!("TCP flow {session_info}: proxy -> client relay failed: {error}"),
-    }
-
-    match (client_to_proxy, proxy_to_client) {
-        (Ok(_), Ok(_)) => Ok(()),
-        (Err(error), _) | (_, Err(error)) => Err(error.into()),
+    match relay_result {
+        Ok((client_to_proxy, proxy_to_client)) => {
+            log::info!("TCP flow {session_info}: client -> proxy finished ({client_to_proxy} bytes)");
+            log::info!("TCP flow {session_info}: proxy -> client finished ({proxy_to_client} bytes)");
+            Ok(())
+        }
+        Err(error) => {
+            log::warn!("TCP flow {session_info}: relay failed; both directions are being closed: {error}");
+            Err(error.into())
+        }
     }
 }
 
@@ -825,7 +881,6 @@ async fn handle_udp_gateway_session(
     socket_queue: Option<Arc<SocketQueue>>,
     ipv6_enabled: bool,
 ) -> crate::Result<()> {
-    let proxy_server_addr = { proxy_handler.lock().await.get_server_addr() };
     let udp_mtu = udpgw_client.get_udp_mtu();
     let udp_timeout = udpgw_client.get_udp_timeout();
 
@@ -840,10 +895,10 @@ async fn handle_udp_gateway_session(
                 }
             }
             None => {
-                let mut tcp_server_stream = create_tcp_stream(&socket_queue, proxy_server_addr).await?;
-                if let Err(e) = handle_proxy_session(&mut tcp_server_stream, proxy_handler).await {
-                    return Err(format!("udpgw connection error: {e}").into());
-                }
+                let (tcp_server_stream, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
+                    Ok(connection) => connection,
+                    Err(error) => return Err(format!("udpgw connection error: {error}").into()),
+                };
                 break UdpGwClientStream::new(tcp_server_stream);
             }
         }
@@ -1016,8 +1071,7 @@ async fn handle_udp_associate_session(
     let (_server, udp_addr) = match udp_addr {
         Some(udp_addr) => (None, udp_addr),
         None => {
-            let mut server = create_tcp_stream(&socket_queue, server_addr).await?;
-            let udp_addr = handle_proxy_session(&mut server, proxy_handler).await?;
+            let (server, udp_addr) = open_proxy_connection(&socket_queue, proxy_handler).await?;
             (Some(server), udp_addr.ok_or("udp associate failed")?)
         }
     };
@@ -1111,17 +1165,10 @@ async fn handle_dns_over_tcp_session(
     socket_queue: Option<Arc<SocketQueue>>,
     ipv6_enabled: bool,
 ) -> crate::Result<()> {
-    let (session_info, server_addr) = {
-        let handler = proxy_handler.lock().await;
-
-        (handler.get_session_info(), handler.get_server_addr())
-    };
-
-    let mut server = create_tcp_stream(&socket_queue, server_addr).await?;
+    let session_info = { proxy_handler.lock().await.get_session_info() };
+    let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
 
     log::info!("Beginning {session_info}");
-
-    let _ = handle_proxy_session(&mut server, proxy_handler).await?;
 
     let mut buf1 = [0_u8; 4096];
     let mut buf2 = [0_u8; 4096];
@@ -1463,5 +1510,53 @@ mod android_socket_protection_tests {
         });
         assert_eq!(result.unwrap_err().kind(), ErrorKind::PermissionDenied);
         assert!(!*called.lock().unwrap());
+    }
+}
+
+
+#[cfg(test)]
+mod proxy_connection_timeout_tests {
+    use super::*;
+    use socks5_impl::protocol::Version;
+    use std::time::Instant;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn stalled_upstream_handshake_times_out_and_releases_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        let server_task = tokio::spawn(async move {
+            let (_stream, _) = listener.accept().await.unwrap();
+            // Keep the accepted socket alive but never answer the SOCKS5 greeting.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        });
+
+        let manager = SocksProxyManager::new(proxy_addr, Version::V5, None);
+        let handler = manager
+            .new_proxy_handler(
+                SessionInfo::new(
+                    "127.0.0.1:12345".parse().unwrap(),
+                    "192.0.2.1:443".parse().unwrap(),
+                    IpProtocol::Tcp,
+                ),
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        let started = Instant::now();
+        let error = open_proxy_connection_with_timeouts(
+            &None,
+            handler,
+            Duration::from_secs(1),
+            Duration::from_millis(50),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("handshake timed out"));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        server_task.abort();
     }
 }
