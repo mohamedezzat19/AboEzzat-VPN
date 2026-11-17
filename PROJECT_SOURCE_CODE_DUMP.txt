@@ -2689,3 +2689,917 @@ private fun RouteMode.description(): String = when (this) {
     RouteMode.DIRECT -> tx("Use the normal network directly")
 }
 
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/proxy/ProxyConnectionTester.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/proxy
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 9132 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.IOException
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
+import java.nio.charset.StandardCharsets
+import java.util.Base64
+
+data class ProxyTestResult(
+    val success: Boolean,
+    val message: String,
+    val latencyMs: Long
+)
+
+object ProxyConnectionTester {
+    private const val CONNECT_TIMEOUT_MS = 7000
+    private const val READ_TIMEOUT_MS = 7000
+    private const val TEST_HOST = "example.com"
+    private const val TEST_PORT = 443
+
+    fun test(profile: ProxyProfile, protectSocket: ((Socket) -> Boolean)? = null): ProxyTestResult {
+        profile.validate()?.let { return ProxyTestResult(false, it, 0) }
+        val start = System.nanoTime()
+        fun elapsedMs() = (System.nanoTime() - start) / 1_000_000
+        return try {
+            Socket().use { socket ->
+                // Force Android to create the underlying file descriptor before
+                // VpnService.protect(Socket) is called. Keep protection before connect.
+                socket.bind(InetSocketAddress(0))
+                if (protectSocket != null && !protectSocket(socket)) {
+                    throw IOException("Could not protect the upstream socket from VPN routing.")
+                }
+                socket.connect(InetSocketAddress(profile.host, profile.port), CONNECT_TIMEOUT_MS)
+                socket.soTimeout = READ_TIMEOUT_MS
+                val input = BufferedInputStream(socket.getInputStream())
+                val output = BufferedOutputStream(socket.getOutputStream())
+                when (profile.protocol) {
+                    ProxyProtocol.HTTP_CONNECT -> testHttpConnect(profile, input, output)
+                    ProxyProtocol.SOCKS5 -> testSocks5(profile, input, output)
+                }
+
+                // A successful proxy handshake is not enough: verify destination TLS
+                // and read an actual HTTP response through the established tunnel.
+                val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory)
+                    .createSocket(socket, TEST_HOST, TEST_PORT, false) as SSLSocket
+                ssl.use { tls ->
+                    tls.soTimeout = READ_TIMEOUT_MS
+                    tls.sslParameters = tls.sslParameters.apply {
+                        endpointIdentificationAlgorithm = "HTTPS"
+                    }
+                    tls.startHandshake()
+                    val request = "GET / HTTP/1.1\r\n" +
+                        "Host: $TEST_HOST\r\n" +
+                        "User-Agent: AboEzzat-VPN-Diagnostic/1.0\r\n" +
+                        "Connection: close\r\n\r\n"
+                    tls.outputStream.write(request.toByteArray(StandardCharsets.US_ASCII))
+                    tls.outputStream.flush()
+                    val response = BufferedInputStream(tls.inputStream)
+                    val headers = readHttpHeaders(response)
+                    val status = headers.lineSequence().firstOrNull().orEmpty()
+                    if (!status.contains(" 200 ")) {
+                        throw IOException("TLS connected, but destination returned: $status")
+                    }
+                    if (response.read() < 0) {
+                        throw IOException("TLS connected, but no response body data was received.")
+                    }
+                }
+            }
+            ProxyTestResult(
+                true,
+                "Proxy CONNECT, destination TLS and HTTPS data transfer succeeded.",
+                elapsedMs()
+            )
+        } catch (e: javax.net.ssl.SSLException) {
+            ProxyTestResult(false, "Proxy CONNECT succeeded or started, but destination TLS failed: ${e.message?.take(100) ?: "TLS error"}", elapsedMs())
+        } catch (e: java.net.SocketTimeoutException) {
+            ProxyTestResult(false, "Timed out during proxy connection, TLS or HTTPS data transfer.", elapsedMs())
+        } catch (e: java.net.UnknownHostException) {
+            ProxyTestResult(false, "Could not resolve the proxy server or destination address.", elapsedMs())
+        } catch (e: Exception) {
+            ProxyTestResult(false, e.message?.take(140) ?: "Proxy HTTPS test failed.", elapsedMs())
+        }
+    }
+
+    private fun testHttpConnect(
+        profile: ProxyProfile,
+        input: BufferedInputStream,
+        output: BufferedOutputStream
+    ) {
+        val auth = if (!profile.username.isNullOrEmpty()) {
+            val raw = "${profile.username}:${profile.password.orEmpty()}"
+            val encoded = Base64.getEncoder().encodeToString(raw.toByteArray(StandardCharsets.UTF_8))
+            "Proxy-Authorization: Basic $encoded\r\n"
+        } else ""
+        val request = "CONNECT $TEST_HOST:$TEST_PORT HTTP/1.1\r\n" +
+            "Host: $TEST_HOST:$TEST_PORT\r\n" +
+            auth +
+            "Proxy-Connection: Keep-Alive\r\n\r\n"
+        output.write(request.toByteArray(StandardCharsets.US_ASCII))
+        output.flush()
+        val response = readHttpHeaders(input)
+        val status = response.lineSequence().firstOrNull().orEmpty()
+        when {
+            status.contains(" 200 ") -> Unit
+            status.contains(" 407 ") -> throw SecurityException("Proxy authentication required or credentials rejected (HTTP 407).")
+            else -> throw IllegalStateException("HTTP proxy rejected CONNECT: $status")
+        }
+    }
+
+    private fun testSocks5(
+        profile: ProxyProfile,
+        input: BufferedInputStream,
+        output: BufferedOutputStream
+    ) {
+        val hasCredentials = !profile.username.isNullOrEmpty()
+        output.write(if (hasCredentials) byteArrayOf(0x05, 0x02, 0x00, 0x02) else byteArrayOf(0x05, 0x01, 0x00))
+        output.flush()
+        val version = input.read()
+        val method = input.read()
+        if (version != 5) throw IllegalStateException("Server is not a SOCKS5 proxy.")
+        when (method) {
+            0 -> Unit
+            2 -> {
+                if (!hasCredentials) throw SecurityException("SOCKS5 server requires a username and password.")
+                val user = profile.username!!.toByteArray(StandardCharsets.UTF_8)
+                val pass = profile.password.orEmpty().toByteArray(StandardCharsets.UTF_8)
+                require(user.size in 1..255 && pass.size in 1..255) { "SOCKS5 credentials must be 1–255 bytes." }
+                output.write(byteArrayOf(0x01, user.size.toByte()))
+                output.write(user)
+                output.write(pass.size)
+                output.write(pass)
+                output.flush()
+                val authVersion = input.read()
+                val authStatus = input.read()
+                if (authVersion != 1 || authStatus != 0) {
+                    throw SecurityException("SOCKS5 authentication failed.")
+                }
+            }
+            0xFF -> throw SecurityException("SOCKS5 server rejected all authentication methods.")
+            else -> throw IllegalStateException("Unsupported SOCKS5 authentication method.")
+        }
+
+        val address = if (profile.remoteDns) {
+            val host = TEST_HOST.toByteArray(StandardCharsets.US_ASCII)
+            byteArrayOf(0x03, host.size.toByte()) + host
+        } else {
+            val ip = InetAddress.getByName(TEST_HOST).address
+            if (ip.size == 4) byteArrayOf(0x01) + ip else byteArrayOf(0x04) + ip
+        }
+        output.write(byteArrayOf(0x05, 0x01, 0x00) + address + byteArrayOf((TEST_PORT shr 8).toByte(), TEST_PORT.toByte()))
+        output.flush()
+
+        val responseVersion = input.read()
+        val reply = input.read()
+        input.read()
+        val addressType = input.read()
+        if (responseVersion != 5) throw IllegalStateException("Invalid SOCKS5 response.")
+        if (reply != 0) throw IllegalStateException("SOCKS5 CONNECT failed (reply code $reply).")
+        val addressLength = when (addressType) {
+            1 -> 4
+            4 -> 16
+            3 -> input.read().also { if (it < 0) throw IllegalStateException("Incomplete SOCKS5 response.") }
+            else -> throw IllegalStateException("Unknown SOCKS5 address type.")
+        }
+        repeat(addressLength + 2) {
+            if (input.read() < 0) throw IllegalStateException("Incomplete SOCKS5 response.")
+        }
+    }
+
+    private fun readHttpHeaders(input: BufferedInputStream): String {
+        val bytes = ArrayList<Byte>()
+        var matched = 0
+        val terminator = byteArrayOf(13, 10, 13, 10)
+        while (bytes.size < 16_384) {
+            val next = input.read()
+            if (next < 0) break
+            bytes.add(next.toByte())
+            if (next.toByte() == terminator[matched]) {
+                matched++
+                if (matched == terminator.size) break
+            } else {
+                matched = if (next == 13) 1 else 0
+            }
+        }
+        if (matched != terminator.size) throw IllegalStateException("Incomplete HTTP proxy response.")
+        return bytes.toByteArray().toString(StandardCharsets.US_ASCII)
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/proxy/ProxyProfile.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/proxy
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 743 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+enum class ProxyProtocol {
+    HTTP_CONNECT,
+    SOCKS5
+}
+
+data class ProxyProfile(
+    val name: String,
+    val host: String,
+    val port: Int,
+    val protocol: ProxyProtocol,
+    val username: String? = null,
+    val password: String? = null,
+    val remoteDns: Boolean = true
+) {
+    fun validate(): String? = when {
+        name.isBlank() -> "Profile name is required"
+        host.isBlank() || host.any(Char::isWhitespace) -> "Enter a valid server IP or hostname"
+        port !in 1..65535 -> "Port must be between 1 and 65535"
+        (username.isNullOrBlank()) != (password.isNullOrBlank()) ->
+            "Username and password must both be provided, or both left empty"
+        else -> null
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/proxy/ProxyTcpRelay.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/proxy
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 1881 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.IOException
+import java.net.Socket
+import java.util.concurrent.ExecutorService
+
+/**
+ * Connects a client TCP socket to a destination through the configured
+ * upstream proxy, then relays bytes in both directions.
+ *
+ * Stream-level bridge only: it does not create/read a TUN interface, recover
+ * packet destinations, or enforce Android per-app routing.
+ *
+ * The returned session owns both sockets. The supplied manager and executor
+ * remain owned by the caller.
+ */
+class ProxyTcpRelay(
+    private val tunnelManager: ProxyTcpTunnelManager,
+    private val relayExecutor: ExecutorService
+) {
+    @Throws(IOException::class)
+    fun open(
+        clientSocket: Socket,
+        profile: ProxyProfile,
+        destinationHost: String,
+        destinationPort: Int,
+        protectSocket: ((Socket) -> Boolean)? = null
+    ): TcpStreamRelay.Session {
+        val upstream = try {
+            tunnelManager.openTunnel(
+                profile = profile,
+                destinationHost = destinationHost,
+                destinationPort = destinationPort,
+                protectSocket = protectSocket
+            )
+        } catch (error: Exception) {
+            closeQuietly(clientSocket)
+            throw error
+        }
+
+        return try {
+            TcpStreamRelay.start(
+                client = clientSocket,
+                upstream = upstream,
+                executor = relayExecutor,
+                onClosed = { tunnelManager.release(upstream) }
+            )
+        } catch (error: Exception) {
+            tunnelManager.release(upstream)
+            closeQuietly(clientSocket)
+            throw error
+        }
+    }
+
+    private fun closeQuietly(socket: Socket) {
+        try {
+            socket.close()
+        } catch (_: IOException) {
+            // Preserve the original open/relay failure.
+        }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/proxy/ProxyTcpTunnel.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/proxy
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 8802 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.nio.charset.StandardCharsets
+import java.util.Base64
+
+/**
+ * Opens a TCP tunnel through an upstream HTTP CONNECT or SOCKS5 proxy.
+ *
+ * The returned socket belongs to the caller and must be closed by the caller.
+ * This class does not create a VPN/TUN interface and does not forward packets.
+ */
+object ProxyTcpTunnel {
+    private const val DEFAULT_CONNECT_TIMEOUT_MS = 7_000
+    private const val DEFAULT_READ_TIMEOUT_MS = 7_000
+    private const val MAX_HTTP_HEADER_BYTES = 16_384
+    private const val DESTINATION_PORT_MAX = 65_535
+
+    @Throws(IOException::class)
+    fun open(
+        profile: ProxyProfile,
+        destinationHost: String,
+        destinationPort: Int,
+        connectTimeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS,
+        readTimeoutMs: Int = DEFAULT_READ_TIMEOUT_MS,
+        protectSocket: ((Socket) -> Boolean)? = null
+    ): Socket {
+        profile.validate()?.let { throw IllegalArgumentException(it) }
+        require(destinationHost.isNotBlank() && !destinationHost.any(Char::isWhitespace)) {
+            "A valid destination hostname or IP is required."
+        }
+        require(destinationPort in 1..DESTINATION_PORT_MAX) {
+            "Destination port must be between 1 and 65535."
+        }
+        require(connectTimeoutMs > 0 && readTimeoutMs > 0) {
+            "Socket timeouts must be positive."
+        }
+
+        val socket = Socket()
+        try {
+            if (protectSocket != null && !protectSocket(socket)) {
+                throw IOException("Could not protect the upstream socket from VPN routing.")
+            }
+            socket.connect(InetSocketAddress(profile.host, profile.port), connectTimeoutMs)
+            socket.soTimeout = readTimeoutMs
+
+            val input = socket.getInputStream()
+            val output = socket.getOutputStream()
+            when (profile.protocol) {
+                ProxyProtocol.HTTP_CONNECT -> establishHttpConnect(
+                    profile, destinationHost, destinationPort, input, output
+                )
+                ProxyProtocol.SOCKS5 -> establishSocks5(
+                    profile, destinationHost, destinationPort, input, output
+                )
+            }
+            // The timeout is only for connection setup/handshake. A live tunnel
+            // must remain usable while idle, like a normal TCP socket.
+            socket.soTimeout = 0
+            return socket
+        } catch (error: Exception) {
+            try {
+                socket.close()
+            } catch (_: IOException) {
+                // Preserve the original connection or handshake failure.
+            }
+            throw error
+        }
+    }
+
+    private fun establishHttpConnect(
+        profile: ProxyProfile,
+        host: String,
+        port: Int,
+        input: InputStream,
+        output: OutputStream
+    ) {
+        val authority = formatAuthority(host, port)
+        val authHeader = if (!profile.username.isNullOrEmpty()) {
+            val credentials = "${profile.username}:${profile.password.orEmpty()}"
+            val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray(StandardCharsets.UTF_8))
+            "Proxy-Authorization: Basic $encoded\r\n"
+        } else {
+            ""
+        }
+        val request = "CONNECT $authority HTTP/1.1\r\n" +
+            "Host: $authority\r\n" +
+            authHeader +
+            "Proxy-Connection: Keep-Alive\r\n\r\n"
+        output.write(request.toByteArray(StandardCharsets.US_ASCII))
+        output.flush()
+
+        val response = readHttpHeaders(input)
+        val statusLine = response.substringBefore("\r\n")
+        val statusCode = statusLine.split(' ').getOrNull(1)?.toIntOrNull()
+        when (statusCode) {
+            200 -> Unit
+            407 -> throw SecurityException("Proxy authentication required or credentials rejected (HTTP 407).")
+            null -> throw IOException("Invalid HTTP proxy response.")
+            else -> throw IOException("HTTP proxy rejected CONNECT with status $statusCode.")
+        }
+    }
+
+    private fun establishSocks5(
+        profile: ProxyProfile,
+        host: String,
+        port: Int,
+        input: InputStream,
+        output: OutputStream
+    ) {
+        val hasCredentials = !profile.username.isNullOrEmpty()
+        output.write(
+            if (hasCredentials) byteArrayOf(0x05, 0x02, 0x00, 0x02)
+            else byteArrayOf(0x05, 0x01, 0x00)
+        )
+        output.flush()
+
+        val version = readByte(input)
+        val method = readByte(input)
+        if (version != 5) throw IOException("Server is not a SOCKS5 proxy.")
+        when (method) {
+            0 -> Unit
+            2 -> {
+                if (!hasCredentials) {
+                    throw SecurityException("SOCKS5 server requires a username and password.")
+                }
+                val username = profile.username!!.toByteArray(StandardCharsets.UTF_8)
+                val password = profile.password.orEmpty().toByteArray(StandardCharsets.UTF_8)
+                require(username.size in 1..255 && password.size in 1..255) {
+                    "SOCKS5 credentials must be 1–255 bytes."
+                }
+                output.write(byteArrayOf(0x01, username.size.toByte()))
+                output.write(username)
+                output.write(password.size)
+                output.write(password)
+                output.flush()
+                val authVersion = readByte(input)
+                val authStatus = readByte(input)
+                if (authVersion != 1 || authStatus != 0) {
+                    throw SecurityException("SOCKS5 authentication failed.")
+                }
+            }
+            0xFF -> throw SecurityException("SOCKS5 server rejected all authentication methods.")
+            else -> throw IOException("Unsupported SOCKS5 authentication method.")
+        }
+
+        val address = encodeSocksAddress(host, profile.remoteDns)
+        output.write(byteArrayOf(0x05, 0x01, 0x00) + address +
+            byteArrayOf((port ushr 8).toByte(), port.toByte()))
+        output.flush()
+
+        val responseVersion = readByte(input)
+        val reply = readByte(input)
+        readByte(input) // Reserved
+        val addressType = readByte(input)
+        if (responseVersion != 5) throw IOException("Invalid SOCKS5 response.")
+        if (reply != 0) throw IOException("SOCKS5 CONNECT failed (reply code $reply).")
+        val boundAddressLength = when (addressType) {
+            1 -> 4
+            4 -> 16
+            3 -> readByte(input)
+            else -> throw IOException("Unknown SOCKS5 address type.")
+        }
+        skipExactly(input, boundAddressLength + 2)
+    }
+
+    private fun encodeSocksAddress(host: String, remoteDns: Boolean): ByteArray {
+        if (remoteDns) {
+            val bytes = host.toByteArray(StandardCharsets.US_ASCII)
+            require(bytes.isNotEmpty() && bytes.size <= 255 && bytes.all { it.toInt() in 33..126 }) {
+                "Remote DNS requires an ASCII hostname of 1–255 bytes."
+            }
+            return byteArrayOf(0x03, bytes.size.toByte()) + bytes
+        }
+
+        val address = InetAddress.getByName(host).address
+        return if (address.size == 4) byteArrayOf(0x01) + address
+        else byteArrayOf(0x04) + address
+    }
+
+    private fun formatAuthority(host: String, port: Int): String {
+        val normalizedHost = if (host.startsWith("[") && host.endsWith("]")) {
+            host
+        } else if (host.contains(':')) {
+            "[$host]"
+        } else {
+            host
+        }
+        return "$normalizedHost:$port"
+    }
+
+    private fun readHttpHeaders(input: InputStream): String {
+        val bytes = ArrayList<Byte>()
+        val terminator = byteArrayOf(13, 10, 13, 10)
+        var matched = 0
+        while (bytes.size < MAX_HTTP_HEADER_BYTES) {
+            val next = input.read()
+            if (next < 0) break
+            bytes.add(next.toByte())
+            if (next == (terminator[matched].toInt() and 0xff)) {
+                matched++
+                if (matched == terminator.size) break
+            } else {
+                matched = if (next == 13) 1 else 0
+            }
+        }
+        if (matched != terminator.size) throw IOException("Incomplete HTTP proxy response.")
+        return bytes.toByteArray().toString(StandardCharsets.US_ASCII)
+    }
+
+    private fun readByte(input: InputStream): Int {
+        val value = input.read()
+        if (value < 0) throw IOException("Unexpected end of proxy handshake.")
+        return value
+    }
+
+    private fun skipExactly(input: InputStream, count: Int) {
+        repeat(count) { readByte(input) }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/proxy/ProxyTcpTunnelManager.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/proxy
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 3789 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.IOException
+import java.net.Socket
+
+/**
+ * Owns the lifecycle of concurrently opened upstream TCP tunnels.
+ *
+ * Call release() when the consumer finishes with a socket. closeAll() closes
+ * every currently registered tunnel but keeps the manager reusable.
+ * close()/shutdown() permanently rejects new tunnels and closes active ones.
+ *
+ * This manager does not detect a remote half-close by itself; the relay owner
+ * must call release() from its finally block when either side finishes.
+ */
+class ProxyTcpTunnelManager(
+    private val maxConcurrentTunnels: Int = DEFAULT_MAX_CONCURRENT_TUNNELS
+) : AutoCloseable {
+    private val lock = Any()
+    private val activeTunnels = LinkedHashSet<Socket>()
+    private var openings = 0
+    private var closed = false
+
+    init {
+        require(maxConcurrentTunnels > 0) { "Maximum concurrent tunnels must be positive." }
+    }
+
+    val activeCount: Int
+        get() = synchronized(lock) { activeTunnels.size }
+
+    val isShutdown: Boolean
+        get() = synchronized(lock) { closed }
+
+    @Throws(IOException::class)
+    fun openTunnel(
+        profile: ProxyProfile,
+        destinationHost: String,
+        destinationPort: Int,
+        connectTimeoutMs: Int = 7_000,
+        readTimeoutMs: Int = 7_000,
+        protectSocket: ((Socket) -> Boolean)? = null
+    ): Socket {
+        synchronized(lock) {
+            if (closed) throw IOException("TCP tunnel manager is shut down.")
+            if (activeTunnels.size + openings >= maxConcurrentTunnels) {
+                throw IOException("Maximum concurrent TCP tunnel limit reached.")
+            }
+            openings++
+        }
+
+        val socket = try {
+            ProxyTcpTunnel.open(
+                profile = profile,
+                destinationHost = destinationHost,
+                destinationPort = destinationPort,
+                connectTimeoutMs = connectTimeoutMs,
+                readTimeoutMs = readTimeoutMs,
+                protectSocket = protectSocket
+            )
+        } catch (error: Exception) {
+            synchronized(lock) { openings-- }
+            throw error
+        }
+
+        val accepted = synchronized(lock) {
+            openings--
+            if (closed) false else activeTunnels.add(socket)
+        }
+        if (!accepted) {
+            try {
+                socket.close()
+            } catch (_: IOException) {
+                // Preserve the manager shutdown result.
+            }
+            throw IOException("TCP tunnel manager was shut down while the tunnel was opening.")
+        }
+        return socket
+    }
+
+    /** Removes and closes a tunnel. Safe to call more than once. */
+    fun release(socket: Socket): Boolean {
+        val wasManaged = synchronized(lock) { activeTunnels.remove(socket) }
+        if (wasManaged) {
+            try {
+                socket.close()
+            } catch (_: IOException) {
+                // The tunnel is removed from ownership even if close reports an error.
+            }
+        }
+        return wasManaged
+    }
+
+    /** Closes all active tunnels but allows subsequent openTunnel() calls. */
+    fun closeAll() {
+        val sockets = synchronized(lock) {
+            activeTunnels.toList().also { activeTunnels.clear() }
+        }
+        sockets.forEach { socket ->
+            try {
+                socket.close()
+            } catch (_: IOException) {
+                // Continue closing the remaining tunnels.
+            }
+        }
+    }
+
+    /** Permanently shuts down this manager and closes every active tunnel. */
+    fun shutdown() {
+        synchronized(lock) { closed = true }
+        closeAll()
+    }
+
+    override fun close() = shutdown()
+
+    companion object {
+        const val DEFAULT_MAX_CONCURRENT_TUNNELS = 64
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/proxy/ProxyTestRequestParser.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/proxy
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 941 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+/**
+ * Converts untrusted service-start extras into a validated proxy profile.
+ * Kept Android-free so malformed requests can be covered by local unit tests.
+ */
+object ProxyTestRequestParser {
+    fun parse(
+        name: String?,
+        host: String?,
+        port: Int,
+        protocol: String?,
+        username: String?,
+        password: String?,
+        remoteDns: Boolean
+    ): ProxyProfile? {
+        val parsedProtocol = runCatching {
+            ProxyProtocol.valueOf(protocol ?: ProxyProtocol.HTTP_CONNECT.name)
+        }.getOrNull() ?: return null
+
+        val profile = ProxyProfile(
+            name = name.orEmpty(),
+            host = host.orEmpty(),
+            port = port,
+            protocol = parsedProtocol,
+            username = username,
+            password = password,
+            remoteDns = remoteDns
+        )
+        return profile.takeIf { it.validate() == null }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/proxy/Socks5UdpAssociateTester.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/proxy
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 8990 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.IOException
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.nio.charset.StandardCharsets
+
+/**
+ * Verifies SOCKS5 UDP support with a real DNS datagram round-trip.
+ * The TCP control connection remains open for the lifetime of the UDP association.
+ */
+data class ProxyUdpTestResult(
+    val supported: Boolean,
+    val message: String,
+    val relayAddress: String? = null,
+    val relayPort: Int? = null
+)
+
+object Socks5UdpAssociateTester {
+    private const val CONNECT_TIMEOUT_MS = 5000
+    private const val READ_TIMEOUT_MS = 5000
+    private const val DNS_TRANSACTION_ID = 0xA1B2
+
+    fun test(
+        profile: ProxyProfile,
+        protectSocket: ((Socket) -> Boolean)? = null,
+        protectDatagramSocket: ((DatagramSocket) -> Boolean)? = null
+    ): ProxyUdpTestResult {
+        profile.validate()?.let { return ProxyUdpTestResult(false, it) }
+        if (profile.protocol != ProxyProtocol.SOCKS5) {
+            return ProxyUdpTestResult(
+                false,
+                "UDP is not available through HTTP CONNECT. This upstream mode carries TCP only."
+            )
+        }
+
+        return try {
+            Socket().use { control ->
+                if (protectSocket != null && !protectSocket(control)) {
+                    throw IOException("Could not protect the SOCKS5 control socket from VPN routing.")
+                }
+                control.connect(InetSocketAddress(profile.host, profile.port), CONNECT_TIMEOUT_MS)
+                control.soTimeout = READ_TIMEOUT_MS
+                val input = BufferedInputStream(control.getInputStream())
+                val output = BufferedOutputStream(control.getOutputStream())
+                negotiateAuthentication(profile, input, output)
+
+                // Keep this TCP control socket open until the UDP relay test completes.
+                output.write(byteArrayOf(0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0))
+                output.flush()
+
+                if (input.read() != 5) throw IOException("Invalid SOCKS5 UDP ASSOCIATE response.")
+                val reply = input.read()
+                input.read() // RSV
+                val addressType = input.read()
+                if (reply != 0) throw IOException("SOCKS5 UDP ASSOCIATE rejected (reply code $reply).")
+
+                val relayHost = when (addressType) {
+                    1 -> InetAddress.getByAddress(readExactly(input, 4)).hostAddress
+                    4 -> InetAddress.getByAddress(readExactly(input, 16)).hostAddress
+                    3 -> {
+                        val length = input.read()
+                        if (length !in 1..255) throw IOException("Invalid SOCKS5 relay domain.")
+                        String(readExactly(input, length), StandardCharsets.US_ASCII)
+                    }
+                    else -> throw IOException("Unknown SOCKS5 relay address type.")
+                }
+                val portBytes = readExactly(input, 2)
+                val relayPort = ((portBytes[0].toInt() and 0xff) shl 8) or
+                    (portBytes[1].toInt() and 0xff)
+                if (relayPort == 0) throw IOException("SOCKS5 server returned an invalid UDP relay port.")
+
+                DatagramSocket(null).use { datagram ->
+                    // Bind first so Android has a real socket fd to protect;
+                    // protect still runs before any packet is sent.
+                    datagram.reuseAddress = true
+                    datagram.bind(InetSocketAddress(0))
+                    if (protectDatagramSocket != null && !protectDatagramSocket(datagram)) {
+                        throw IOException("Could not protect the UDP datagram socket from VPN routing.")
+                    }
+                    datagram.soTimeout = READ_TIMEOUT_MS
+
+                    val relay = InetSocketAddress(InetAddress.getByName(relayHost), relayPort)
+                    val dnsQuery = buildDnsQuery()
+                    val request = buildSocksUdpRequest(dnsQuery)
+                    datagram.send(DatagramPacket(request, request.size, relay))
+
+                    val responseBuffer = ByteArray(2048)
+                    val response = DatagramPacket(responseBuffer, responseBuffer.size)
+                    datagram.receive(response)
+                    val dnsPayload = extractDnsPayload(response.data.copyOf(response.length))
+                    if (dnsPayload.size < 12) throw IOException("UDP relay returned an incomplete DNS response.")
+                    val transactionId = ((dnsPayload[0].toInt() and 0xff) shl 8) or
+                        (dnsPayload[1].toInt() and 0xff)
+                    if (transactionId != DNS_TRANSACTION_ID || (dnsPayload[2].toInt() and 0x80) == 0) {
+                        throw IOException("UDP relay response did not match the DNS test request.")
+                    }
+                }
+
+                ProxyUdpTestResult(
+                    true,
+                    "SOCKS5 UDP datagram round-trip verified with a DNS response.",
+                    relayHost,
+                    relayPort
+                )
+            }
+        } catch (_: java.net.SocketTimeoutException) {
+            ProxyUdpTestResult(false, "SOCKS5 UDP relay timed out: no DNS response was received.")
+        } catch (error: Exception) {
+            ProxyUdpTestResult(
+                false,
+                error.message?.take(140) ?: "SOCKS5 UDP datagram test failed."
+            )
+        }
+    }
+
+    private fun buildDnsQuery(): ByteArray {
+        val name = byteArrayOf(
+            7, 101, 120, 97, 109, 112, 108, 101,
+            3, 99, 111, 109, 0
+        )
+        return byteArrayOf(
+            (DNS_TRANSACTION_ID ushr 8).toByte(), DNS_TRANSACTION_ID.toByte(),
+            0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ) + name + byteArrayOf(0x00, 0x01, 0x00, 0x01)
+    }
+
+    private fun buildSocksUdpRequest(payload: ByteArray): ByteArray =
+        byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + payload
+
+    private fun extractDnsPayload(packet: ByteArray): ByteArray {
+        if (packet.size < 10 || packet[0].toInt() != 0 || packet[1].toInt() != 0) {
+            throw IOException("Invalid SOCKS5 UDP relay response header.")
+        }
+        if (packet[2].toInt() != 0) throw IOException("Fragmented SOCKS5 UDP response is unsupported.")
+        val addressLength = when (packet[3].toInt() and 0xff) {
+            1 -> 4
+            4 -> 16
+            3 -> {
+                if (packet.size < 5) throw IOException("Invalid UDP response domain header.")
+                1 + (packet[4].toInt() and 0xff)
+            }
+            else -> throw IOException("Unknown UDP response address type.")
+        }
+        val payloadOffset = 4 + addressLength + 2
+        if (packet.size < payloadOffset + 12) throw IOException("UDP relay response has no DNS payload.")
+        return packet.copyOfRange(payloadOffset, packet.size)
+    }
+
+    private fun negotiateAuthentication(
+        profile: ProxyProfile,
+        input: BufferedInputStream,
+        output: BufferedOutputStream
+    ) {
+        val hasCredentials = !profile.username.isNullOrEmpty()
+        output.write(if (hasCredentials) byteArrayOf(5, 2, 0, 2) else byteArrayOf(5, 1, 0))
+        output.flush()
+        val version = input.read()
+        val method = input.read()
+        if (version != 5) throw IOException("Server is not a SOCKS5 proxy.")
+        when (method) {
+            0 -> Unit
+            2 -> {
+                if (!hasCredentials) throw IOException("SOCKS5 server requires username and password.")
+                val username = profile.username!!.toByteArray(StandardCharsets.UTF_8)
+                val password = profile.password.orEmpty().toByteArray(StandardCharsets.UTF_8)
+                require(username.size in 1..255 && password.size in 1..255) {
+                    "SOCKS5 credentials must be 1–255 bytes."
+                }
+                output.write(byteArrayOf(1, username.size.toByte()))
+                output.write(username)
+                output.write(password.size)
+                output.write(password)
+                output.flush()
+                if (input.read() != 1 || input.read() != 0) throw IOException("SOCKS5 authentication failed.")
+            }
+            0xff -> throw IOException("SOCKS5 server rejected all authentication methods.")
+            else -> throw IOException("Unsupported SOCKS5 authentication method.")
+        }
+    }
+
+    private fun readExactly(input: BufferedInputStream, count: Int): ByteArray {
+        val result = ByteArray(count)
+        for (index in 0 until count) {
+            val value = input.read()
+            if (value < 0) throw IOException("Incomplete SOCKS5 UDP ASSOCIATE response.")
+            result[index] = value.toByte()
+        }
+        return result
+    }
+}
+
