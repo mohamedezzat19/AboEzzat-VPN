@@ -51,10 +51,10 @@ object ProxyConnectionTester {
                         endpointIdentificationAlgorithm = "HTTPS"
                     }
                     tls.startHandshake()
-                    val request = "GET / HTTP/1.1\\r\\n" +
-                        "Host: $TEST_HOST\\r\\n" +
-                        "User-Agent: AboEzzat-VPN-Diagnostic/1.0\\r\\n" +
-                        "Connection: close\\r\\n\\r\\n"
+                    val request = "GET / HTTP/1.1\r\n" +
+                        "Host: $TEST_HOST\r\n" +
+                        "User-Agent: AboEzzat-VPN-Diagnostic/1.0\r\n" +
+                        "Connection: close\r\n\r\n"
                     tls.outputStream.write(request.toByteArray(StandardCharsets.US_ASCII))
                     tls.outputStream.flush()
                     val response = BufferedInputStream(tls.inputStream)
