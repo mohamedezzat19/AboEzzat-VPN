@@ -966,51 +966,105 @@ private fun Dashboard(store: ProxyProfileStore) {
     }
 
     selectedProfileDetails?.let { profile ->
-        AlertDialog(
+        Dialog(
             onDismissRequest = { selectedProfileDetails = null },
-            containerColor = Panel,
-            title = { Text(profile.name, color = Color.White, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(tx("PROFILE DETAILS"), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text(tx("Server") + ": ${profile.host}:${profile.port}", color = Color.White, fontSize = 13.sp)
-                    Text(tx("Protocol") + ": ${profile.protocol.name.replace("_", " ")}", color = Color.White, fontSize = 13.sp)
-                    Text(tx(if (profile.username.isNullOrEmpty()) "No authentication" else "Authentication saved securely"), color = Muted, fontSize = 12.sp)
-                    Text(tx(if (profile.remoteDns) "Remote DNS enabled" else "Remote DNS disabled"), color = Muted, fontSize = 12.sp)
-                    Text(tx(if (profile.name == activeName) "Active profile" else "Not active profile"), color = if (profile.name == activeName) Accent else Muted, fontSize = 12.sp)
-                    val result = testResults[profile.name]
-                    if (result != null) {
-                        Text(tx(if (result.success) "TCP test passed" else "TCP test failed"), color = if (result.success) Accent else Color(0xFFFF8B8B), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text(result.message, color = Muted, fontSize = 11.sp)
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 18.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { selectedProfileDetails = null }) {
+                            Text("‹", color = Accent, fontSize = 30.sp)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(tx("PROXY PROFILE"), color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+                            Text(profile.name, color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+                        TextButton(onClick = {
+                            editorProfile = profile
+                            editorError = ""
+                            selectedProfileDetails = null
+                            showEditor = true
+                        }) { Text(tx("Edit"), color = Accent) }
                     }
-                }
-            },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    TextButton(onClick = {
-                        activeName = profile.name
-                        store.setActiveProfile(profile.name)
-                        selectedProfileDetails = null
-                        testProxyProfile(profile)
-                    }) { Text(tx("Test TCP"), color = Accent) }
-                    TextButton(onClick = {
-                        if (tunnelActive) sendTunnelCommand(AboEzzatVpnService.ACTION_STOP_TUNNEL)
-                        else connectSelectedProfile(profile)
-                    }) { Text(tx(if (tunnelActive) "Disconnect" else "Connect"), color = Accent) }
-                }
-            },
-            dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = {
-                        editorProfile = profile
-                        editorError = ""
-                        selectedProfileDetails = null
-                        showEditor = true
-                    }) { Text(tx("Edit"), color = Muted) }
-                    TextButton(onClick = { selectedProfileDetails = null }) { Text(tx("Close"), color = Muted) }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Panel),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(tx("CONNECTION DETAILS"), color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            Text(tx("Server") + ": ${profile.host}:${profile.port}", color = Color.White, fontSize = 14.sp)
+                            Text(tx("Protocol") + ": ${profile.protocol.name.replace("_", " ")}", color = Color.White, fontSize = 14.sp)
+                            Text(tx(if (profile.username.isNullOrEmpty()) "No authentication" else "Authentication saved securely"), color = Muted, fontSize = 12.sp)
+                            Text(tx(if (profile.remoteDns) "Remote DNS enabled" else "Remote DNS disabled"), color = Muted, fontSize = 12.sp)
+                            Text(tx(if (profile.name == activeName) "Selected profile" else "Not selected"), color = if (profile.name == activeName) Accent else Muted, fontSize = 12.sp)
+                        }
+                    }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = Panel),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(tx("CONNECTION TEST"), color = Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                            val result = testResults[profile.name]
+                            Text(
+                                result?.message ?: tx("Run the HTTPS test to verify proxy connection, destination TLS and actual response data."),
+                                color = if (result?.success == true) Accent else Muted,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp
+                            )
+                            if (result != null) {
+                                Text(
+                                    (if (result.success) tx("HTTPS test passed") else tx("HTTPS test failed")) + " · ${result.latencyMs} ms",
+                                    color = if (result.success) Accent else Color(0xFFFF8B8B),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            Text(tx("A successful test confirms the proxy handshake, TLS validation and a real HTTPS response. It does not by itself prove every app or every protocol works through the VPN."), color = Muted, fontSize = 10.sp, lineHeight = 15.sp)
+                        }
+                    }
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            activeName = profile.name
+                            store.setActiveProfile(profile.name)
+                            testProxyProfile(profile)
+                        },
+                        enabled = testing[profile.name] != true,
+                        colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
+                    ) {
+                        Text(tx(if (testing[profile.name] == true) "Testing HTTPS…" else "Test HTTPS connection"))
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            if (tunnelActive) sendTunnelCommand(AboEzzatVpnService.ACTION_STOP_TUNNEL)
+                            else connectSelectedProfile(profile)
+                        }
+                    ) { Text(tx(if (tunnelActive) "Disconnect tunnel" else "Connect tunnel")) }
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            editorProfile = profile
+                            editorError = ""
+                            selectedProfileDetails = null
+                            showEditor = true
+                        }
+                    ) { Text(tx("Edit profile")) }
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { selectedProfileDetails = null }
+                    ) { Text(tx("Back to profiles"), color = Muted) }
                 }
             }
-        )
+        }
     }
 
     if (showEditor) {
