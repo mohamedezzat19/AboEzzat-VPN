@@ -13,7 +13,7 @@ import org.junit.Test
 
 class ProxyConnectionTesterTest {
     @Test
-    fun protectsUpstreamSocketBeforeConnectingAndCompletesHttpConnectHandshake() {
+    fun protectsUpstreamSocketBeforeConnectingAndRequiresDestinationTlsAfterConnect() {
         val server = ServerSocket(0)
         val requestReceived = AtomicBoolean(false)
         val serverThread = thread(start = true) {
@@ -54,8 +54,8 @@ class ProxyConnectionTesterTest {
             serverThread.join(4000)
             assertTrue("Protection callback must run before socket.connect()", protectedBeforeConnect.get())
             assertTrue("HTTP CONNECT request should reach the local proxy", requestReceived.get())
-            assertTrue(result.message, result.success)
-            assertTrue(result.message.contains("TLS was not tested"))
+            assertFalse("A proxy-only fixture must not pass the full HTTPS diagnostic", result.success)
+            assertTrue("The proxy CONNECT should complete before the expected TLS failure: ${result.message}", result.message.contains("TLS failed"))
         } finally {
             server.close()
             serverThread.join(1000)
@@ -123,7 +123,8 @@ class ProxyConnectionTesterTest {
                 ProxyProfile("SOCKS no auth", "127.0.0.1", server.localPort, ProxyProtocol.SOCKS5)
             )
             serverThread.join(4000)
-            assertTrue(result.message, result.success)
+            assertFalse("A SOCKS handshake without destination TLS must not pass the full HTTPS diagnostic", result.success)
+            assertTrue("The SOCKS tunnel should reach the expected TLS failure: ${result.message}", result.message.contains("TLS failed"))
             assertTrue("SOCKS5 request should send the hostname for remote DNS", requestWasRemoteDns.get())
         } finally {
             server.close()
@@ -168,7 +169,8 @@ class ProxyConnectionTesterTest {
                 )
             )
             serverThread.join(4000)
-            assertTrue(result.message, result.success)
+            assertFalse("A SOCKS handshake without destination TLS must not pass the full HTTPS diagnostic", result.success)
+            assertTrue("The authenticated SOCKS tunnel should reach the expected TLS failure: ${result.message}", result.message.contains("TLS failed"))
             assertTrue("SOCKS5 credentials should be sent using RFC 1929", credentialsAccepted.get())
         } finally {
             server.close()
