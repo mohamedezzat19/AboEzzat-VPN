@@ -1,3 +1,18 @@
 <resources>
     <string name="app_name">AboEzzat VPN</string>
+    <string name="proxy_browser_title">Proxy-only browser</string>
+    <string name="proxy_browser_address">Address</string>
+    <string name="proxy_browser_go">Go</string>
+    <string name="proxy_browser_back">Back</string>
+    <string name="proxy_browser_forward">Forward</string>
+    <string name="proxy_browser_reload">Reload</string>
+    <string name="proxy_browser_close">Close</string>
+    <string name="proxy_browser_active">Proxy active · VPN not used</string>
+    <string name="proxy_browser_scope">This proxy is used only by this in-app browser. Other apps are not affected.</string>
+    <string name="proxy_browser_unsupported">This Android System WebView does not support proxy override.</string>
+    <string name="proxy_browser_invalid_profile">The selected proxy profile is invalid or requires authentication.</string>
+    <string name="proxy_browser_vpn_running">Disconnect the AboEzzat VPN tunnel before opening proxy-only mode.</string>
+    <string name="proxy_browser_apply_failed">Could not apply proxy settings.</string>
+    <string name="proxy_browser_loading">Loading through proxy…</string>
+    <string name="proxy_browser_loaded">Page loaded through proxy.</string>
 </resources>
