@@ -7477,3 +7477,857 @@ class ConnectionRouteDecisionEngineTest {
     }
 }
 
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/DnsOverTlsForwarderTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 1990 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.ProxyProtocol
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Test
+
+class DnsOverTlsForwarderTest {
+    @Test
+    fun rejectsMalformedQueryBeforeOpeningProxySocket() {
+        val forwarder = DnsOverTlsForwarder()
+        val profile = ProxyProfile(
+            name = "test",
+            host = "127.0.0.1",
+            port = 1,
+            protocol = ProxyProtocol.HTTP_CONNECT
+        )
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            forwarder.forward(profile, "resolver.example", ByteArray(12))
+        }
+        assertEquals(
+            "DNS query is malformed or uses an unsupported query layout.",
+            error.message
+        )
+    }
+
+    @Test
+    fun rejectsBlankResolverBeforeOpeningProxySocket() {
+        val forwarder = DnsOverTlsForwarder()
+        val profile = ProxyProfile(
+            name = "test",
+            host = "127.0.0.1",
+            port = 1,
+            protocol = ProxyProtocol.HTTP_CONNECT
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            forwarder.forward(profile, " ", validQuery())
+        }
+    }
+
+    @Test
+    fun rejectsInvalidTimeoutAndMessageLimit() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DnsOverTlsForwarder(connectTimeoutMs = 0)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DnsOverTlsForwarder(maxMessageBytes = 11)
+        }
+    }
+
+    private fun validQuery(): ByteArray = byteArrayOf(
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 'e'.code.toByte(), 'x'.code.toByte(), 'a'.code.toByte(),
+        'm'.code.toByte(), 'p'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+        0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+        0x00, 0x00, 0x01, 0x00, 0x01
+    )
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/DnsQueryParserTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3161 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class DnsQueryParserTest {
+    @Test
+    fun parsesSingleAQuestion() {
+        val parsed = DnsQueryParser.parse(query("Example.COM", type = 1, rd = true))
+        assertEquals(0x1234, parsed?.transactionId)
+        assertEquals("example.com", parsed?.name)
+        assertEquals(1, parsed?.type)
+        assertEquals(1, parsed?.queryClass)
+        assertTrue(parsed?.recursionDesired == true)
+        assertFalse(parsed?.ednsPresent ?: true)
+    }
+
+    @Test
+    fun parsesAaaaQuestionAndRecursionFlag() {
+        val parsed = DnsQueryParser.parse(query("ipv6.example", type = 28, rd = false))
+        assertEquals(28, parsed?.type)
+        assertFalse(parsed?.recursionDesired ?: true)
+    }
+
+    @Test
+    fun parsesEdnsOptAndDnssecOk() {
+        val parsed = DnsQueryParser.parse(query("secure.example", 1, true, includeEdns = true))
+        assertTrue(parsed?.ednsPresent == true)
+        assertEquals(1232, parsed?.udpPayloadSize)
+        assertEquals(0, parsed?.ednsVersion)
+        assertTrue(parsed?.dnssecOk == true)
+        assertEquals(0, parsed?.ednsExtendedRcode)
+    }
+
+    @Test
+    fun rejectsMalformedEdnsAndUnsupportedQueries() {
+        val valid = query("example.com", 1, true)
+        val response = valid.copyOf().also { it[2] = 0x81.toByte() }
+        assertNull(DnsQueryParser.parse(response))
+        assertNull(DnsQueryParser.parse(valid.copyOf(valid.size - 2)))
+        assertNull(DnsQueryParser.parse(ByteArray(10)))
+        val multipleQuestions = valid.copyOf().also { it[5] = 2 }
+        assertNull(DnsQueryParser.parse(multipleQuestions))
+        val compressedName = valid.copyOf().also { it[12] = 0xc0.toByte() }
+        assertNull(DnsQueryParser.parse(compressedName))
+
+        val badOpt = query("example.com", 1, true, includeEdns = true)
+            .also { it[it.size - 1] = 1 } // option data has no option header
+        assertNull(DnsQueryParser.parse(badOpt))
+    }
+
+    private fun query(
+        name: String,
+        type: Int,
+        rd: Boolean,
+        includeEdns: Boolean = false
+    ): ByteArray {
+        val bytes = ArrayList<Byte>()
+        fun add(value: Int) { bytes += value.toByte() }
+        add(0x12); add(0x34)
+        add(if (rd) 0x01 else 0x00); add(0x00)
+        add(0x00); add(0x01) // QDCOUNT
+        repeat(4) { add(0) } // ANCOUNT and NSCOUNT
+        add(0); add(if (includeEdns) 1 else 0) // ARCOUNT
+        name.split(".").forEach { label ->
+            add(label.length)
+            label.toByteArray(Charsets.US_ASCII).forEach { bytes += it }
+        }
+        add(0)
+        add(type shr 8); add(type and 0xff)
+        add(0); add(1) // IN
+
+        if (includeEdns) {
+            add(0) // root owner name
+            add(0); add(41) // OPT
+            add(0x04); add(0xd0) // UDP payload size 1232
+            add(0); add(0) // extended RCODE and EDNS version
+            add(0x80); add(0) // DO bit
+            add(0); add(0) // RDLEN
+        }
+        return bytes.toByteArray()
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/DnsTcpForwarderTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 4654 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.ProxyProtocol
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Test
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+
+class DnsTcpForwarderTest {
+    @Test
+    fun forwardsLengthPrefixedDnsMessageThroughHttpConnectProxy() {
+        ServerSocket(0).use { proxyServer ->
+            val executor = Executors.newSingleThreadExecutor()
+            try {
+                val proxyTask = executor.submit {
+                    proxyServer.accept().use { socket ->
+                        val input = BufferedInputStream(socket.getInputStream())
+                        val output = BufferedOutputStream(socket.getOutputStream())
+                        val request = readHeaders(input)
+                        check(request.startsWith("CONNECT resolver.test:53 "))
+                        output.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
+                        output.flush()
+
+                        val dataIn = DataInputStream(input)
+                        val queryLength = dataIn.readUnsignedShort()
+                        val query = ByteArray(queryLength)
+                        dataIn.readFully(query)
+                        val response = query.copyOf().also {
+                            it[2] = 0x81.toByte()
+                            it[3] = 0x80.toByte()
+                        }
+                        val dataOut = DataOutputStream(output)
+                        dataOut.writeShort(response.size)
+                        dataOut.write(response)
+                        dataOut.flush()
+                    }
+                }
+
+                val query = dnsQuery()
+                val result = DnsTcpForwarder().forward(
+                    profile = ProxyProfile(
+                        name = "local test proxy",
+                        host = "127.0.0.1",
+                        port = proxyServer.localPort,
+                        protocol = ProxyProtocol.HTTP_CONNECT
+                    ),
+                    resolverHost = "resolver.test",
+                    query = query
+                )
+                assertArrayEquals(query.copyOf().also {
+                    it[2] = 0x81.toByte()
+                    it[3] = 0x80.toByte()
+                }, result)
+                proxyTask.get(3, TimeUnit.SECONDS)
+            } finally {
+                executor.shutdownNow()
+            }
+        }
+    }
+
+    @Test
+    fun rejectsMalformedDnsQueryBeforeOpeningProxySocket() {
+        val forwarder = DnsTcpForwarder()
+        val profile = ProxyProfile(
+            name = "test",
+            host = "127.0.0.1",
+            port = 1,
+            protocol = ProxyProtocol.HTTP_CONNECT
+        )
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            forwarder.forward(profile, "127.0.0.1", ByteArray(12))
+        }
+        assertEquals("DNS query is malformed or uses an unsupported query layout.", error.message)
+    }
+
+    @Test
+    fun rejectsInvalidConstructorLimits() {
+        assertThrows(IllegalArgumentException::class.java) {
+            DnsTcpForwarder(maxMessageBytes = 11)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            DnsTcpForwarder(readTimeoutMs = 0)
+        }
+    }
+
+    private fun readHeaders(input: BufferedInputStream): String {
+        val bytes = ArrayList<Byte>()
+        var matched = 0
+        while (matched < 4) {
+            val value = input.read()
+            check(value >= 0)
+            bytes += value.toByte()
+            matched = when {
+                matched == 0 && value == 13 -> 1
+                matched == 1 && value == 10 -> 2
+                matched == 2 && value == 13 -> 3
+                matched == 3 && value == 10 -> 4
+                value == 13 -> 1
+                else -> 0
+            }
+        }
+        return bytes.toByteArray().toString(Charsets.US_ASCII)
+    }
+
+    private fun dnsQuery(): ByteArray = byteArrayOf(
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 'e'.code.toByte(), 'x'.code.toByte(), 'a'.code.toByte(),
+        'm'.code.toByte(), 'p'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+        0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+        0x00, 0x00, 0x01, 0x00, 0x01
+    )
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/DnsUdpTcpBridgeTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 4858 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.ProxyProtocol
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+
+class DnsUdpTcpBridgeTest {
+    @Test
+    fun receivesLocalUdpQueryAndReturnsDnsOverTcpProxyResponse() {
+        ServerSocket(0).use { proxyServer ->
+            val executor = Executors.newSingleThreadExecutor()
+            val proxyTask = executor.submit {
+                proxyServer.accept().use { socket ->
+                    val input = BufferedInputStream(socket.getInputStream())
+                    val output = BufferedOutputStream(socket.getOutputStream())
+                    val headers = readHeaders(input)
+                    check(headers.startsWith("CONNECT resolver.test:53 "))
+                    output.write("HTTP/1.1 200 Connection Established\r\n\r\n".toByteArray())
+                    output.flush()
+
+                    val dataIn = DataInputStream(input)
+                    val queryLength = dataIn.readUnsignedShort()
+                    val query = ByteArray(queryLength)
+                    dataIn.readFully(query)
+                    val response = dnsResponse(query)
+                    val dataOut = DataOutputStream(output)
+                    dataOut.writeShort(response.size)
+                    dataOut.write(response)
+                    dataOut.flush()
+                }
+            }
+
+            val profile = ProxyProfile(
+                name = "bridge test",
+                host = "127.0.0.1",
+                port = proxyServer.localPort,
+                protocol = ProxyProtocol.HTTP_CONNECT
+            )
+            val bridge = DnsUdpTcpBridge()
+            bridge.use {
+                val local = bridge.start(profile, "resolver.test")
+                assertEqualsLoopback(local.address.hostAddress)
+                DatagramSocket().use { client ->
+                    client.soTimeout = 4_000
+                    val query = dnsQuery()
+                    client.send(DatagramPacket(query, query.size, local))
+                    val buffer = ByteArray(2_048)
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    client.receive(packet)
+                    assertArrayEquals(dnsResponse(query), packet.data.copyOf(packet.length))
+                }
+                proxyTask.get(3, TimeUnit.SECONDS)
+                assertTrue(bridge.stats().received >= 1)
+                val forwardingDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+                while (bridge.stats().forwarded < 1 && System.nanoTime() < forwardingDeadline) {
+                    Thread.sleep(10)
+                }
+                assertTrue(bridge.stats().forwarded >= 1)
+                assertTrue(bridge.isRunning)
+            }
+            assertFalse(bridge.isRunning)
+            val restarted = bridge.start(profile, "resolver.test")
+            assertEqualsLoopback(restarted.address.hostAddress)
+            assertTrue(bridge.isRunning)
+            bridge.close()
+            assertFalse(bridge.isRunning)
+            executor.shutdownNow()
+        }
+    }
+
+    private fun assertEqualsLoopback(value: String) {
+        org.junit.Assert.assertEquals("127.0.0.1", value)
+    }
+
+    private fun readHeaders(input: BufferedInputStream): String {
+        val bytes = ArrayList<Byte>()
+        var matched = 0
+        while (matched < 4) {
+            val value = input.read()
+            check(value >= 0)
+            bytes += value.toByte()
+            matched = when {
+                matched == 0 && value == 13 -> 1
+                matched == 1 && value == 10 -> 2
+                matched == 2 && value == 13 -> 3
+                matched == 3 && value == 10 -> 4
+                value == 13 -> 1
+                else -> 0
+            }
+        }
+        return bytes.toByteArray().toString(Charsets.US_ASCII)
+    }
+
+    private fun dnsQuery(): ByteArray = byteArrayOf(
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 'e'.code.toByte(), 'x'.code.toByte(), 'a'.code.toByte(),
+        'm'.code.toByte(), 'p'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+        0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+        0x00, 0x00, 0x01, 0x00, 0x01
+    )
+
+    private fun dnsResponse(query: ByteArray): ByteArray =
+        query.copyOf().also {
+            it[2] = 0x81.toByte()
+            it[3] = 0x80.toByte()
+        }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/Ipv4ConnectionTupleParserTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3491 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import java.net.InetAddress
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Test
+
+class Ipv4ConnectionTupleParserTest {
+    @Test
+    fun parsesOutboundTcpTuple() {
+        val tuple = Ipv4ConnectionTupleParser.parseOutbound(packet(protocol = 6, sourcePort = 43120, destinationPort = 443))
+        assertEquals(IpTransportProtocol.TCP, tuple.protocol)
+        assertEquals("10.0.0.2", tuple.local.address.hostAddress)
+        assertEquals(43120, tuple.local.port)
+        assertEquals("203.0.113.10", tuple.remote.address.hostAddress)
+        assertEquals(443, tuple.remote.port)
+    }
+
+    @Test
+    fun parsesOutboundUdpTuple() {
+        val tuple = Ipv4ConnectionTupleParser.parseOutbound(packet(protocol = 17, sourcePort = 53000, destinationPort = 53))
+        assertEquals(IpTransportProtocol.UDP, tuple.protocol)
+        assertEquals(53000, tuple.local.port)
+        assertEquals(53, tuple.remote.port)
+    }
+
+    @Test
+    fun rejectsIpv6AndUnknownProtocols() {
+        val ipv6 = packet(17).also { it[0] = 0x60 }
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4ConnectionTupleParser.parseOutbound(ipv6)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4ConnectionTupleParser.parseOutbound(packet(1))
+        }
+    }
+
+    @Test
+    fun rejectsBadIpChecksum() {
+        val bytes = packet(17)
+        bytes[8] = 63
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4ConnectionTupleParser.parseOutbound(bytes)
+        }
+    }
+
+    @Test
+    fun rejectsFragmentedPackets() {
+        val bytes = packet(17)
+        put16(bytes, 6, 0x2000)
+        fixIpChecksum(bytes)
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4ConnectionTupleParser.parseOutbound(bytes)
+        }
+    }
+
+    @Test
+    fun rejectsInvalidTcpDataOffset() {
+        val bytes = packet(6)
+        bytes[32] = 0x40
+        fixIpChecksum(bytes)
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4ConnectionTupleParser.parseOutbound(bytes)
+        }
+    }
+
+    private fun packet(
+        protocol: Int,
+        sourcePort: Int = 43120,
+        destinationPort: Int = 443
+    ): ByteArray {
+        val transportLength = if (protocol == 6) 20 else 8
+        val bytes = ByteArray(20 + transportLength)
+        bytes[0] = 0x45
+        put16(bytes, 2, bytes.size)
+        put16(bytes, 4, 0x1234)
+        bytes[8] = 64
+        bytes[9] = protocol.toByte()
+        byteArrayOf(10, 0, 0, 2).copyInto(bytes, 12)
+        byteArrayOf(203.toByte(), 0, 113, 10).copyInto(bytes, 16)
+        put16(bytes, 20, sourcePort)
+        put16(bytes, 22, destinationPort)
+        if (protocol == 6) {
+            bytes[32] = 0x50
+        } else {
+            put16(bytes, 24, 8)
+        }
+        fixIpChecksum(bytes)
+        return bytes
+    }
+
+    private fun fixIpChecksum(bytes: ByteArray) {
+        bytes[10] = 0
+        bytes[11] = 0
+        var sum = 0
+        for (i in 0 until 20 step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or (bytes[i + 1].toInt() and 0xff)
+        }
+        while ((sum ushr 16) != 0) sum = (sum and 0xffff) + (sum ushr 16)
+        val checksum = sum.inv() and 0xffff
+        put16(bytes, 10, checksum)
+    }
+
+    private fun put16(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 8).toByte()
+        bytes[offset + 1] = value.toByte()
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/Ipv4TcpPacketParserTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 5072 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
+import org.junit.Test
+
+class Ipv4TcpPacketParserTest {
+    @Test
+    fun parsesTcpHeaderFlagsSequenceAndPayload() {
+        val bytes = tcpPacket(payload = byteArrayOf(1, 2, 3, 4))
+        val parsed = Ipv4TcpPacketParser.parse(bytes)
+
+        assertEquals(IpTransportProtocol.TCP, parsed.tuple.protocol)
+        assertEquals(43120, parsed.tuple.local.port)
+        assertEquals(443, parsed.tuple.remote.port)
+        assertEquals(0xf1234567L, parsed.sequenceNumber)
+        assertEquals(0x89abcdefL, parsed.acknowledgementNumber)
+        assertEquals(0x18, parsed.flags)
+        assertTrue(parsed.isPsh)
+        assertTrue(parsed.isAck)
+        assertFalse(parsed.isSyn)
+        assertEquals(32768, parsed.windowSize)
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4), parsed.payload)
+        assertEquals(20, parsed.tcpHeaderLength)
+        assertTrue(parsed.tcpOptions.isEmpty())
+    }
+
+    @Test
+    fun parsesTcpOptionsAndNsFlag() {
+        val bytes = tcpPacket(
+            options = byteArrayOf(1, 1, 0, 0),
+            flags = Ipv4TcpPacketParser.FLAG_SYN or Ipv4TcpPacketParser.FLAG_NS
+        )
+        val parsed = Ipv4TcpPacketParser.parse(bytes)
+        assertEquals(24, parsed.tcpHeaderLength)
+        assertTrue(parsed.isSyn)
+        assertTrue(parsed.isNs)
+        assertArrayEquals(byteArrayOf(1, 1, 0, 0), parsed.tcpOptions)
+    }
+
+    @Test
+    fun rejectsInvalidTcpChecksum() {
+        val bytes = tcpPacket(payload = byteArrayOf(9))
+        bytes[bytes.lastIndex] = 8
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4TcpPacketParser.parse(bytes)
+        }
+    }
+
+    @Test
+    fun rejectsMalformedTcpOptionLength() {
+        val bytes = tcpPacket(options = byteArrayOf(2, 1, 0, 0))
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4TcpPacketParser.parse(bytes)
+        }
+    }
+
+    @Test
+    fun rejectsUdpPackets() {
+        val bytes = tcpPacket()
+        bytes[9] = 17
+        fixIpChecksum(bytes)
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4TcpPacketParser.parse(bytes)
+        }
+    }
+
+    private fun tcpPacket(
+        payload: ByteArray = byteArrayOf(),
+        options: ByteArray = byteArrayOf(),
+        flags: Int = Ipv4TcpPacketParser.FLAG_PSH or Ipv4TcpPacketParser.FLAG_ACK
+    ): ByteArray {
+        require(options.size % 4 == 0)
+        val ipLength = 20
+        val tcpHeaderLength = 20 + options.size
+        val tcpLength = tcpHeaderLength + payload.size
+        val bytes = ByteArray(ipLength + tcpLength)
+        bytes[0] = 0x45
+        put16(bytes, 2, bytes.size)
+        put16(bytes, 4, 0x1234)
+        bytes[8] = 64
+        bytes[9] = 6
+        byteArrayOf(10, 0, 0, 2).copyInto(bytes, 12)
+        byteArrayOf(203.toByte(), 0, 113, 10).copyInto(bytes, 16)
+
+        val tcp = ipLength
+        put16(bytes, tcp, 43120)
+        put16(bytes, tcp + 2, 443)
+        put32(bytes, tcp + 4, 0xf1234567L)
+        put32(bytes, tcp + 8, 0x89abcdefL)
+        bytes[tcp + 12] = ((tcpHeaderLength / 4) shl 4 or ((flags ushr 8) and 1)).toByte()
+        bytes[tcp + 13] = flags.toByte()
+        put16(bytes, tcp + 14, 32768)
+        put16(bytes, tcp + 18, 0)
+        options.copyInto(bytes, tcp + 20)
+        payload.copyInto(bytes, tcp + tcpHeaderLength)
+        put16(bytes, tcp + 16, tcpChecksum(bytes, tcp, tcpLength))
+        fixIpChecksum(bytes)
+        return bytes
+    }
+
+    private fun tcpChecksum(bytes: ByteArray, offset: Int, length: Int): Int {
+        var sum = 0L
+        for (i in 12 until 20 step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or (bytes[i + 1].toInt() and 0xff)
+        }
+        sum += 6
+        sum += length
+        var index = 0
+        while (index + 1 < length) {
+            sum += ((bytes[offset + index].toInt() and 0xff) shl 8) or
+                (bytes[offset + index + 1].toInt() and 0xff)
+            index += 2
+        }
+        if (index < length) sum += (bytes[offset + index].toInt() and 0xff) shl 8
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun fixIpChecksum(bytes: ByteArray) {
+        bytes[10] = 0
+        bytes[11] = 0
+        var sum = 0
+        for (i in 0 until 20 step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or (bytes[i + 1].toInt() and 0xff)
+        }
+        while ((sum ushr 16) != 0) sum = (sum and 0xffff) + (sum ushr 16)
+        put16(bytes, 10, sum.inv() and 0xffff)
+    }
+
+    private fun put16(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 8).toByte()
+        bytes[offset + 1] = value.toByte()
+    }
+
+    private fun put32(bytes: ByteArray, offset: Int, value: Long) {
+        put16(bytes, offset, (value ushr 16).toInt() and 0xffff)
+        put16(bytes, offset + 2, value.toInt() and 0xffff)
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketCodecTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 5623 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class Ipv4UdpDnsPacketCodecTest {
+    @Test
+    fun parsesDnsUdpQueryAndBuildsReverseResponseWithValidChecksums() {
+        val dns = dnsQuery()
+        val packet = makeIpv4UdpPacket(
+            source = byteArrayOf(192.toByte(), 0, 2, 10),
+            destination = byteArrayOf(192.toByte(), 0, 2, 53),
+            sourcePort = 53000,
+            destinationPort = 53,
+            dns = dns
+        )
+        val parsed = Ipv4UdpDnsPacketCodec.parseQuery(packet)
+        assertEquals(53000, parsed.sourcePort)
+        assertEquals(53, parsed.destinationPort)
+        assertArrayEquals(dns, parsed.dnsPayload)
+
+        val responseDns = dns.copyOf().also {
+            it[2] = 0x81.toByte()
+            it[3] = 0x80.toByte()
+        }
+        val response = Ipv4UdpDnsPacketCodec.buildResponse(parsed, responseDns)
+        val parsedResponse = Ipv4UdpDnsPacketCodec.parseResponseForTest(response)
+        assertEquals(53, parsedResponse.first)
+        assertEquals(53000, parsedResponse.second)
+        assertArrayEquals(responseDns, parsedResponse.third)
+        assertTrue("Generated UDP checksum must validate", udpChecksumValid(response))
+    }
+
+    @Test
+    fun rejectsReservedIpv4Flag() {
+        val packet = makeIpv4UdpPacket(
+            byteArrayOf(10, 0, 0, 2), byteArrayOf(10, 0, 0, 1),
+            50000, 53, dnsQuery()
+        )
+        putU16(packet, 6, 0x8000)
+        putU16(packet, 10, 0)
+        putU16(packet, 10, ipv4Checksum(packet, 20))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4UdpDnsPacketCodec.parseQuery(packet)
+        }
+    }
+
+    @Test
+    fun rejectsWrongDestinationPortAndCorruptHeaderChecksum() {
+        val dns = dnsQuery()
+        val wrongPort = makeIpv4UdpPacket(
+            byteArrayOf(10, 0, 0, 2), byteArrayOf(10, 0, 0, 1),
+            50000, 5353, dns
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4UdpDnsPacketCodec.parseQuery(wrongPort)
+        }
+
+        val corrupt = makeIpv4UdpPacket(
+            byteArrayOf(10, 0, 0, 2), byteArrayOf(10, 0, 0, 1),
+            50000, 53, dns
+        )
+        corrupt[8] = 10
+        assertThrows(IllegalArgumentException::class.java) {
+            Ipv4UdpDnsPacketCodec.parseQuery(corrupt)
+        }
+    }
+
+    private fun makeIpv4UdpPacket(
+        source: ByteArray,
+        destination: ByteArray,
+        sourcePort: Int,
+        destinationPort: Int,
+        dns: ByteArray
+    ): ByteArray {
+        val packet = ByteArray(20 + 8 + dns.size)
+        packet[0] = 0x45
+        putU16(packet, 2, packet.size)
+        putU16(packet, 4, 0x1234)
+        putU16(packet, 6, 0x4000)
+        packet[8] = 64
+        packet[9] = 17
+        source.copyInto(packet, 12)
+        destination.copyInto(packet, 16)
+        val udp = 20
+        putU16(packet, udp, sourcePort)
+        putU16(packet, udp + 2, destinationPort)
+        putU16(packet, udp + 4, 8 + dns.size)
+        dns.copyInto(packet, udp + 8)
+        putU16(packet, 10, ipv4Checksum(packet, 20))
+        return packet
+    }
+
+    private fun udpChecksumValid(packet: ByteArray): Boolean {
+        val ihl = (packet[0].toInt() and 0x0f) * 4
+        val udpLength = ((packet[ihl + 4].toInt() and 0xff) shl 8) or
+            (packet[ihl + 5].toInt() and 0xff)
+        var sum = 0L
+        for (offset in listOf(12, 16)) {
+            for (i in offset until offset + 4 step 2) {
+                sum += ((packet[i].toInt() and 0xff) shl 8) or
+                    (packet[i + 1].toInt() and 0xff)
+            }
+        }
+        sum += 17
+        sum += udpLength
+        for (i in ihl until ihl + udpLength step 2) {
+            val high = (packet[i].toInt() and 0xff) shl 8
+            val low = if (i + 1 < ihl + udpLength) packet[i + 1].toInt() and 0xff else 0
+            sum += high or low
+        }
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return (sum.toInt() and 0xffff) == 0xffff
+    }
+
+    private fun ipv4Checksum(bytes: ByteArray, length: Int): Int {
+        var sum = 0L
+        for (i in 0 until length step 2) {
+            sum += ((bytes[i].toInt() and 0xff) shl 8) or
+                (bytes[i + 1].toInt() and 0xff)
+        }
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun putU16(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 8).toByte()
+        bytes[offset + 1] = value.toByte()
+    }
+
+    private fun dnsQuery(): ByteArray = byteArrayOf(
+        0x12, 0x34, 0x01, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x07, 'e'.code.toByte(), 'x'.code.toByte(), 'a'.code.toByte(),
+        'm'.code.toByte(), 'p'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+        0x03, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+        0x00, 0x00, 0x01, 0x00, 0x01
+    )
+}
+
+/** Test-only minimal decoder to check reply ports and DNS payload. */
+private fun Ipv4UdpDnsPacketCodec.parseResponseForTest(packet: ByteArray): Triple<Int, Int, ByteArray> {
+    val ihl = (packet[0].toInt() and 0x0f) * 4
+    val sourcePort = ((packet[ihl].toInt() and 0xff) shl 8) or (packet[ihl + 1].toInt() and 0xff)
+    val destinationPort = ((packet[ihl + 2].toInt() and 0xff) shl 8) or (packet[ihl + 3].toInt() and 0xff)
+    return Triple(sourcePort, destinationPort, packet.copyOfRange(ihl + 8, packet.size))
+}
+
