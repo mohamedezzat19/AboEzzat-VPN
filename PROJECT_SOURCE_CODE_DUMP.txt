@@ -5798,3 +5798,499 @@ class Ipv4UdpDnsPacketProcessor(
     }
 }
 
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/NativeSocketProtection.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 572 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+/**
+ * Small fail-closed boundary around Android VpnService.protect(int).
+ *
+ * Kept independent of Android so invalid descriptors and callback failures
+ * can be covered by local unit tests. The native engine must never continue
+ * with connect/bind when this returns false.
+ */
+internal object NativeSocketProtection {
+    fun protect(fd: Int, protectFd: (Int) -> Boolean): Boolean {
+        if (fd < 0) return false
+        return try {
+            protectFd(fd)
+        } catch (_: RuntimeException) {
+            false
+        }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/NativeSocketProtectorBridge.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 1267 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import androidx.annotation.Keep
+
+/**
+ * JNI bridge for the future patched native tunnel engine.
+ *
+ * Loading this library only installs the callback bridge; it does not create
+ * a TUN or start a VPN. The engine may call abz_protect_socket_fd only while
+ * this service is bound.
+ */
+@Keep
+internal object NativeSocketProtectorBridge {
+    init {
+        System.loadLibrary("abz_protector")
+    }
+
+    @JvmStatic
+    @Keep
+    external fun nativeBindService(service: AboEzzatVpnService): Boolean
+
+    @JvmStatic
+    @Keep
+    external fun nativeUnbindService()
+
+    @JvmStatic
+    @Keep
+    external fun nativeProtectSocket(fd: Int): Boolean
+
+    /**
+     * Blocking native run entry point. Call only from a dedicated worker
+     * thread; never from the Android main thread.
+     */
+    @JvmStatic
+    @Keep
+    external fun nativeArmEngineStart(): Boolean
+
+    @JvmStatic
+    @Keep
+    external fun nativeCancelEngineStart()
+
+    @JvmStatic
+    @Keep
+    external fun nativeRunEngine(
+        cliArgs: String,
+        tunMtu: Int,
+        packetInformation: Boolean
+    ): Int
+
+    /** Requests cancellation; caller must still wait for nativeRunEngine to return. */
+    @JvmStatic
+    @Keep
+    external fun nativeStopEngine(): Int
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/NativeTunnelRunner.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 1930 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.RejectedExecutionException
+
+/**
+ * Owns the native run/stop ordering. The TUN descriptor must stay open for
+ * the complete blocking native run call and is closed only after it returns.
+ */
+internal class NativeTunnelRunner(
+    private val executor: ExecutorService,
+    private val runEngine: (String, Int, Boolean) -> Int,
+    private val stopEngine: () -> Int,
+    private val onFinished: (Int) -> Unit
+) {
+    private val lock = Any()
+    private var active = false
+
+    fun isActive(): Boolean = synchronized(lock) { active }
+
+    fun start(
+        cliArgs: String,
+        mtu: Int,
+        packetInformation: Boolean = false,
+        closeTunDescriptor: () -> Unit
+    ): Boolean = synchronized(lock) {
+        if (active) return@synchronized false
+        active = true
+        try {
+            executor.execute {
+                val result = try {
+                    runEngine(cliArgs, mtu, packetInformation)
+                } catch (_: Throwable) {
+                    NATIVE_RUN_EXCEPTION
+                } finally {
+                    // Do not close the Android PFD until native run has
+                    // completely returned and released its raw-fd use.
+                }
+                try {
+                    closeTunDescriptor()
+                } finally {
+                    synchronized(lock) { active = false }
+                    onFinished(result)
+                }
+            }
+            true
+        } catch (_: RejectedExecutionException) {
+            active = false
+            false
+        }
+    }
+
+    fun stop(): Boolean = synchronized(lock) {
+        if (!active) return@synchronized false
+        try {
+            stopEngine() >= 0
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    companion object {
+        const val NATIVE_RUN_EXCEPTION = -100
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/TcpFlowLifecycleTracker.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 6918 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+/**
+ * Bounded bookkeeping for observed TCP flow lifecycles.
+ *
+ * This is deliberately NOT a TCP implementation: it does not generate ACKs,
+ * retransmit segments, negotiate MSS/window scaling, reorder data, or create
+ * upstream sockets. It only tracks packet observations for diagnostics and
+ * future integration with a real TCP/IP stack.
+ */
+class TcpFlowLifecycleTracker(
+    private val maxFlows: Int = DEFAULT_MAX_FLOWS,
+    private val closedRetentionMillis: Long = DEFAULT_CLOSED_RETENTION_MILLIS
+) {
+    enum class Direction { OUTBOUND, INBOUND }
+
+    enum class State {
+        SYN_SENT,
+        SYN_ACK_RECEIVED,
+        ESTABLISHED,
+        LOCAL_HALF_CLOSED,
+        REMOTE_HALF_CLOSED,
+        CLOSING,
+        CLOSED
+    }
+
+    data class FlowKey(
+        val localAddress: String,
+        val localPort: Int,
+        val remoteAddress: String,
+        val remotePort: Int
+    )
+
+    data class Snapshot(
+        val key: FlowKey,
+        val state: State,
+        val createdAtMillis: Long,
+        val lastSeenAtMillis: Long,
+        val localFinSeen: Boolean,
+        val remoteFinSeen: Boolean,
+        val lastSequenceNumber: Long,
+        val lastAcknowledgementNumber: Long,
+        val packetsSeen: Long,
+        val payloadBytesSeen: Long
+    )
+
+    sealed interface ObserveResult {
+        data class Updated(val snapshot: Snapshot) : ObserveResult
+        data object CapacityReached : ObserveResult
+        data object InvalidInitialPacket : ObserveResult
+    }
+
+    private data class MutableFlow(
+        val key: FlowKey,
+        val createdAtMillis: Long,
+        var lastSeenAtMillis: Long,
+        var state: State,
+        var localFinSeen: Boolean = false,
+        var remoteFinSeen: Boolean = false,
+        var lastSequenceNumber: Long = 0,
+        var lastAcknowledgementNumber: Long = 0,
+        var packetsSeen: Long = 0,
+        var payloadBytesSeen: Long = 0
+    ) {
+        fun snapshot() = Snapshot(
+            key, state, createdAtMillis, lastSeenAtMillis,
+            localFinSeen, remoteFinSeen, lastSequenceNumber,
+            lastAcknowledgementNumber, packetsSeen, payloadBytesSeen
+        )
+    }
+
+    private val flows = LinkedHashMap<FlowKey, MutableFlow>()
+
+    init {
+        require(maxFlows > 0) { "maxFlows must be positive." }
+        require(closedRetentionMillis >= 0) { "closedRetentionMillis cannot be negative." }
+    }
+
+    @Synchronized
+    fun observe(packet: Ipv4TcpPacketParser.Packet, direction: Direction, nowMillis: Long): ObserveResult {
+        require(nowMillis >= 0) { "nowMillis cannot be negative." }
+        prune(nowMillis)
+
+        val key = when (direction) {
+            Direction.OUTBOUND -> FlowKey(
+                packet.tuple.local.address.hostAddress!!,
+                packet.tuple.local.port,
+                packet.tuple.remote.address.hostAddress!!,
+                packet.tuple.remote.port
+            )
+            Direction.INBOUND -> FlowKey(
+                packet.tuple.remote.address.hostAddress!!,
+                packet.tuple.remote.port,
+                packet.tuple.local.address.hostAddress!!,
+                packet.tuple.local.port
+            )
+        }
+
+        val isNewOutboundSyn = direction == Direction.OUTBOUND &&
+            packet.isSyn && !packet.isAck && !packet.isRst
+        var flow = flows[key]
+
+        // A terminal diagnostic record must not absorb a new TCP connection
+        // that reuses the same four-tuple.
+        if (flow != null && isNewOutboundSyn && flow.state.isTerminal()) {
+            flows.remove(key)
+            flow = null
+        }
+
+        if (flow == null) {
+            if (!isNewOutboundSyn) return ObserveResult.InvalidInitialPacket
+            if (flows.size >= maxFlows) return ObserveResult.CapacityReached
+            flow = MutableFlow(
+                key = key,
+                createdAtMillis = nowMillis,
+                lastSeenAtMillis = nowMillis,
+                state = State.SYN_SENT
+            )
+            flows[key] = flow
+        }
+
+        // Keep timestamps monotonic if callers deliver delayed observations.
+        flow.lastSeenAtMillis = maxOf(flow.lastSeenAtMillis, nowMillis)
+        flow.lastSequenceNumber = packet.sequenceNumber
+        flow.lastAcknowledgementNumber = packet.acknowledgementNumber
+        flow.packetsSeen = saturatingAdd(flow.packetsSeen, 1)
+        flow.payloadBytesSeen = saturatingAdd(flow.payloadBytesSeen, packet.payload.size.toLong())
+
+        if (packet.isRst) {
+            flow.state = State.CLOSED
+        } else {
+            if (packet.isFin) {
+                if (direction == Direction.OUTBOUND) flow.localFinSeen = true
+                else flow.remoteFinSeen = true
+            }
+
+            if (flow.localFinSeen && flow.remoteFinSeen) {
+                flow.state = State.CLOSING
+            } else if (flow.localFinSeen) {
+                flow.state = State.LOCAL_HALF_CLOSED
+            } else if (flow.remoteFinSeen) {
+                flow.state = State.REMOTE_HALF_CLOSED
+            } else {
+                flow.state = when {
+                    flow.state == State.SYN_SENT && direction == Direction.INBOUND &&
+                        packet.isSyn && packet.isAck -> State.SYN_ACK_RECEIVED
+                    flow.state == State.SYN_ACK_RECEIVED && direction == Direction.OUTBOUND &&
+                        packet.isAck && !packet.isSyn -> State.ESTABLISHED
+                    flow.state == State.SYN_SENT && direction == Direction.OUTBOUND &&
+                        packet.isSyn -> State.SYN_SENT
+                    flow.state == State.ESTABLISHED -> State.ESTABLISHED
+                    else -> flow.state
+                }
+            }
+        }
+
+        return ObserveResult.Updated(flow.snapshot())
+    }
+
+    @Synchronized
+    fun snapshot(): List<Snapshot> = flows.values.map { it.snapshot() }
+
+    @Synchronized
+    fun remove(key: FlowKey): Boolean = flows.remove(key) != null
+
+    @Synchronized
+    fun prune(nowMillis: Long): Int {
+        require(nowMillis >= 0) { "nowMillis cannot be negative." }
+        val before = flows.size
+        val iterator = flows.entries.iterator()
+        while (iterator.hasNext()) {
+            val flow = iterator.next().value
+            if (flow.state.isTerminal() &&
+                nowMillis >= flow.lastSeenAtMillis &&
+                nowMillis - flow.lastSeenAtMillis >= closedRetentionMillis
+            ) {
+                iterator.remove()
+            }
+        }
+        return before - flows.size
+    }
+
+    private fun State.isTerminal(): Boolean = this == State.CLOSING || this == State.CLOSED
+
+    private fun saturatingAdd(current: Long, increment: Long): Long =
+        if (Long.MAX_VALUE - current < increment) Long.MAX_VALUE else current + increment
+
+    companion object {
+        const val DEFAULT_MAX_FLOWS = 512
+        const val DEFAULT_CLOSED_RETENTION_MILLIS = 30_000L
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/Tun2ProxyCommandBuilder.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 2910 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.ProxyProtocol
+
+/**
+ * Builds the exact CLI consumed by the vendored tun2proxy 0.8.7 parser.
+ * Credentials are percent-encoded before entering the proxy URL and every
+ * argument is shell-quoted for shlex::split on the Rust side.
+ */
+internal object Tun2ProxyCommandBuilder {
+    fun build(profile: ProxyProfile, tunFd: Int, mtu: Int = 1500): String? {
+        if (profile.validate() != null || tunFd < 0 || mtu !in 576..65535) return null
+
+        val scheme = when (profile.protocol) {
+            ProxyProtocol.HTTP_CONNECT -> "http"
+            ProxyProtocol.SOCKS5 -> "socks5"
+        }
+        val host = profile.host
+            .removePrefix("[")
+            .removeSuffix("]")
+            .let { value -> if (value.contains(':')) "[$value]" else value }
+
+        val auth = if (profile.username != null && profile.password != null) {
+            "${percentEncode(profile.username)}:${percentEncode(profile.password)}@"
+        } else {
+            ""
+        }
+        val proxyUrl = "$scheme://$auth$host:${profile.port}"
+
+        val dnsMode = if (profile.remoteDns) "virtual" else "over-tcp"
+        val arguments = mutableListOf(
+            "tun2proxy-bin",
+            "--tun-fd", tunFd.toString(),
+            "--close-fd-on-drop", "false",
+            "--proxy", proxyUrl,
+            "--dns", dnsMode,
+            "--ipv6-enabled",
+            "--mtu", mtu.toString(),
+            "--verbosity", "info"
+        )
+
+        // The native engine intentionally drops non-DNS UDP unless opted in.
+        // Android Proxy Server's SOCKS5 UDP ASSOCIATE path is tested separately,
+        // so enable real UDP forwarding for SOCKS5 profiles (QUIC, messaging,
+        // speed tests, etc.). HTTP CONNECT has no UDP transport and stays TCP-only.
+        if (profile.protocol == ProxyProtocol.SOCKS5) {
+            arguments += "--udp-enabled"
+        }
+
+        return arguments.joinToString(" ") { shellQuote(it) }
+    }
+
+    private fun percentEncode(value: String): String {
+        val hex = "0123456789ABCDEF"
+        val out = StringBuilder()
+        value.toByteArray(Charsets.UTF_8).forEach { byte ->
+            val valueByte = byte.toInt() and 0xff
+            val safe = valueByte in 0x41..0x5a ||
+                valueByte in 0x61..0x7a ||
+                valueByte in 0x30..0x39 ||
+                valueByte == 0x2d || valueByte == 0x2e ||
+                valueByte == 0x5f || valueByte == 0x7e
+            if (safe) {
+                out.append(valueByte.toChar())
+            } else {
+                out.append('%')
+                out.append(hex[valueByte ushr 4])
+                out.append(hex[valueByte and 0x0f])
+            }
+        }
+        return out.toString()
+    }
+
+    private fun shellQuote(value: String): String =
+        "'" + value.replace("'", "'\\''") + "'"
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/res/drawable/ic_aboezzat_vpn.xml
+المجلد: app/src/main/res/drawable
+وظيفة الملف: موارد Android من نصوص ورسومات وأنماط.
+الحجم الأصلي: 917 بايت
+==============================================================================
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#0A1020"
+        android:pathData="M54,4A50,50 0,1 0,54 104A50,50 0,1 0,54 4" />
+    <path
+        android:fillColor="#182B43"
+        android:pathData="M54,15L83,27L80,59C77,76 65,88 54,94C43,88 31,76 28,59L25,27Z" />
+    <path
+        android:fillColor="#62E6B5"
+        android:pathData="M54,29L31,77L43,77L54,54L65,77L77,77Z" />
+    <path
+        android:fillColor="#0A1020"
+        android:pathData="M45,61L63,61L67,69L41,69Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,23C50,18 58,18 63,23L60,27C57,24 51,24 48,27Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M39,17C47,9 61,9 69,17L66,21C59,15 49,15 42,21Z" />
+</vector>
+
+
+==============================================================================
+اسم الملف: app/src/main/res/values-ar/strings.xml
+المجلد: app/src/main/res/values-ar
+وظيفة الملف: موارد Android من نصوص ورسومات وأنماط.
+الحجم الأصلي: 80 بايت
+==============================================================================
+<resources>
+    <string name="app_name">أبو عزت VPN</string>
+</resources>
+
