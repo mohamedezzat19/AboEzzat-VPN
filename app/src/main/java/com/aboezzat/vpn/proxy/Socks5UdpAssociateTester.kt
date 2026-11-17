@@ -90,11 +90,9 @@ object Socks5UdpAssociateTester {
                         control.inetAddress,
                         advertisedRelayAddress
                     )
-                    if (effectiveRelayAddress != advertisedRelayAddress) {
-                        // Match the native engine: unspecified addresses are
-                        // placeholders, and remote clients cannot reach a
-                        // loopback address advertised by a remote proxy.
-                    }
+                    // Match the native engine: unspecified addresses are
+                    // placeholders, and remote clients cannot reach a
+                    // loopback address advertised by a remote proxy.
                     val relay = InetSocketAddress(effectiveRelayAddress, relayPort)
                     val dnsQuery = buildDnsQuery()
                     val request = buildSocksUdpRequest(dnsQuery)
