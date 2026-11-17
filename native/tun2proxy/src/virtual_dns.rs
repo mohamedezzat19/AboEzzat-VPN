@@ -54,8 +54,10 @@ impl VirtualDns {
 
         // Skip the subnet's first address. For IPv6 this is the
         // subnet-router anycast address (RFC 4291).
-        let next_ipv4_addr = Self::increment_ip(ipv4_network_addr)?;
-        let next_ipv6_addr = Self::increment_ip(ipv6_network_addr)?;
+        let next_ipv4_addr = Self::increment_ip(ipv4_network_addr)
+            .expect("IPv4 virtual DNS pool address must be incrementable");
+        let next_ipv6_addr = Self::increment_ip(ipv6_network_addr)
+            .expect("IPv6 virtual DNS pool address must be incrementable");
 
         Self {
             trailing_dot: false,
