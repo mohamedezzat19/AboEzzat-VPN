@@ -9044,3 +9044,611 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
 }
 
+
+
+==============================================================================
+اسم الملف: docs/ANDROID_JNI_BRIDGE_CONTRACT.md
+المجلد: docs
+وظيفة الملف: توثيق هندسي للتكامل والقرارات التقنية.
+الحجم الأصلي: 5415 بايت
+==============================================================================
+# App-owned JNI bridge contract
+
+Status: JNI callback bridge source and CMake target are now present in the app. The patched tun2proxy engine is not yet linked or shipped.
+
+This document defines the Android socket-protection interface for the pinned tun2proxy fork. It does not establish a TUN or advertise a working VPN.
+
+## Java/Kotlin ownership
+
+- AboEzzatVpnService owns the ParcelFileDescriptor returned by VpnService.Builder.establish().
+- The service exposes one synchronous method to native code: protectNativeSocket(fd: Int): Boolean.
+- That method calls VpnService.protect(fd) directly. It must not dispatch protection to a Handler, coroutine, or executor.
+- The service must not close the TUN descriptor until the native run call has returned.
+- The native bridge must not cache an Activity. It currently holds a JNI global reference to the live service while the Android service is alive; this must be narrowed to the native run lifetime when the engine is integrated.
+
+## Proposed C ABI
+
+The fork should expose a callback registration API with explicit user data:
+
+~~~c
+typedef bool (*abz_socket_protect_fn)(int fd, void *user_data);
+
+int tun2proxy_set_socket_protector(
+    abz_socket_protect_fn callback,
+    void *user_data
+);
+
+int tun2proxy_run_with_cli_args(
+    const char *cli_args,
+    unsigned short tun_mtu,
+    bool close_fd_on_drop
+);
+
+int tun2proxy_stop(void);
+~~~
+
+Rules:
+
+1. Registration is accepted only while no run is active.
+2. Android tunnel mode refuses to start if the callback is absent.
+3. The callback runs synchronously on the socket-creating thread and before connect, bind, send, or DNS network use.
+4. A false callback result closes the socket and returns an error. No unprotected retry is permitted.
+5. Callback and user data remain valid until the run function returns.
+6. Stop is idempotent. A new run cannot start until the prior run exits and callback state is cleared.
+
+The upstream run/stop functions alone are insufficient. The pinned fork must add this callback API and wire it into every Android outbound socket path.
+
+## JNI callback mechanics
+
+The current JNI bridge implements the following mechanics:
+
+- Captures JavaVM once from JNI_OnLoad.
+- Creates a global reference to the current service when the Android service starts.
+- Caches the method ID for protectNativeSocket(I)Z while a valid JNI environment is available.
+- In the native callback, calls GetEnv; attaches the current native thread only if detached; invokes the Java method synchronously; treats a Java exception as protection failure; detaches only if this callback attached the thread.
+- Serializes callback-state teardown with an in-flight counter so the global reference cannot be deleted while a callback is using it.
+- Clears the global reference only after callbacks in flight have returned. Native run integration still needs to enforce stop/run ordering.
+- Treat missing service binding, JNI attach failure, a Java exception, or a failed JNI call as protection failure.
+
+Do not hold a global lifecycle mutex while invoking Java. Use a short-lived state guard or in-flight callback counter to prevent stop/reference-deletion races without deadlocking Java error handling.
+
+## Native socket factory requirements
+
+At the pinned upstream revision, the central call sites are create_tcp_stream(...) and create_udp_stream(...) in src/lib.rs.
+
+- TCP must be created unconnected (TcpSocket::new_v4/new_v6), protected by raw fd, then connected.
+- UDP must be created unbound, protected by raw fd, then bound/connected and converted to Tokio.
+- Protect the proxy endpoint and any UDP gateway endpoint as well as per-destination sockets.
+- Resolve a proxy hostname through the underlying Android Network before TUN establishment, or require a numeric IP for the first milestone.
+- Audit dependencies and optional features for independent outbound socket creation. Central call-site changes are not sufficient if another path creates sockets independently.
+
+## Required tests before enabling the feature
+
+### JNI/lifecycle tests
+
+- Callback true: native socket creation proceeds.
+- Callback false: socket closes and no connect/bind/send occurs.
+- Missing callback: Android tunnel startup fails closed.
+- Callback exception or JNI attach failure: fail closed.
+- Stop during an in-flight callback: no use-after-free and no stale service reference.
+- Stop waits for native run completion before Java closes the TUN descriptor.
+- Repeated start/stop cycles do not retain global references or run threads.
+
+### Socket tests
+
+- IPv4 and IPv6 TCP sockets invoke protection exactly once before connect.
+- IPv4 and IPv6 UDP sockets invoke protection exactly once before bind/connect.
+- Proxy DNS and optional UDP gateway sockets are covered.
+- A false result never falls back to an unprotected socket.
+
+### Android device tests
+
+Use a controlled proxy on the other phone. Verify its endpoint remains reachable while TUN is active. Repeat with Wi-Fi/mobile handover, VPN revoke, process stop, and a failed protect callback. Capture logs proving callback-before-connect ordering; do not infer it from a successful page load alone.
+
+## Feature gate
+
+Until the patched native library, JNI bridge, and tests above exist:
+
+- Do not call Builder.establish() for production use.
+- Do not label the app as connected or claim device-wide traffic protection.
+- Keep saved per-app route choices as configuration only.
+
+
+
+==============================================================================
+اسم الملف: docs/ANDROID_NATIVE_TUNNEL_INTEGRATION.md
+المجلد: docs
+وظيفة الملف: توثيق هندسي للتكامل والقرارات التقنية.
+الحجم الأصلي: 6883 بايت
+==============================================================================
+# Android native tunnel integration — verified design notes
+
+Status: research/design only. This document does not claim that the native engine is integrated or that a VPN tunnel is working.
+
+## Upstream revision inspected
+
+- Project: https://github.com/tun2proxy/tun2proxy
+- Tag: `v0.8.7`
+- Cargo package version: `0.8.7`
+- License declared by Cargo.toml: MIT
+- Rust edition: 2024; minimum Rust version: 1.90.
+- Library crate types: `staticlib`, `cdylib`, and `lib`.
+
+Files inspected at that tag:
+- `src/android.rs`
+- `src/general_api.rs`
+- `src/args.rs`
+- `src/lib.rs`
+- `src/socket_transfer.rs`
+- `src/traffic_status.rs`
+
+## Confirmed entry points
+
+The generic C ABI exports:
+- `tun2proxy_run_with_cli_args(const char*, unsigned short, bool)`
+- `tun2proxy_stop()`
+- `tun2proxy_set_traffic_status_callback(...)`
+
+The Android JNI convenience entry points in upstream `src/android.rs` are named for the Java class `com.github.shadowsocks.bg.Tun2proxy`; they are not drop-in methods for this app's package. Prefer a small app-owned JNI bridge calling the generic C ABI, rather than copying those Java symbol names.
+
+The run function is blocking. It must execute on a dedicated native/background thread. The stop function cancels the active run token. Upstream protects against a second concurrent run with a global run token; callers must still serialize start/stop and wait for the run thread to exit before releasing the TUN descriptor or unloading the library.
+
+For an Android `VpnService`-owned TUN descriptor, the native arguments must include `--tun-fd <fd> --close-fd-on-drop false` so the native engine does not close a descriptor owned by the Java service. The Java service remains responsible for closing its `ParcelFileDescriptor` after the native run has terminated.
+
+## Critical socket-loop issue
+
+Android's `VpnService.protect(int)` must be called for every upstream socket before that socket connects/sends, otherwise traffic to the proxy server can be routed back into the VPN interface.
+
+At v0.8.7, the normal Android build path in `src/lib.rs` sets `socket_queue = None`. In that path:
+- TCP upstream sockets are created through `TcpStream::connect(peer)`.
+- UDP upstream sockets are created with `UdpSocket::bind(...)`, then connected.
+- The Linux `socket_transfer` implementation is cfg-gated to Linux with the `unshare` feature and is not an Android socket-protection hook.
+
+No call to Android `VpnService.protect(int)` is exposed by these inspected creation paths. Therefore, the unmodified upstream library must not be started behind an established Android TUN and assumed loop-safe.
+
+## Required upstream patch before integration
+
+A maintained fork or vendored patch must introduce a socket-protection hook at socket creation time:
+
+1. Create TCP sockets without connecting; obtain the raw descriptor; invoke the registered protector; fail closed if protection returns false; only then connect.
+2. Create UDP sockets without binding/sending; invoke the protector on the raw descriptor; fail closed if protection returns false; only then bind/connect.
+3. Cover every socket path, including proxy endpoint DNS resolution and optional UDP gateway traffic. Avoid a path that silently falls back to unprotected sockets.
+4. Expose a narrow C callback registration API or an Android-specific JNI bridge. The callback must safely attach native worker threads to the JVM, hold/release global references correctly, and call the live service's `protect(fd)`.
+5. Ensure callback lifetime is bounded by the native run lifecycle; do not retain a stale service reference after stop/revoke.
+6. Add native tests proving the callback is invoked before connect/bind and that a false callback prevents network use.
+
+A Java/Kotlin wrapper alone cannot protect sockets created internally by Tokio unless the native engine exposes their descriptors before network use.
+
+## Concrete socket patch shape
+
+The v0.8.7 call sites in `src/lib.rs` are `create_tcp_stream(...)` and `create_udp_stream(...)`. The normal Android path currently reaches `TcpStream::connect(peer)` for TCP and `UdpSocket::bind(...)` followed by `connect(peer)` for UDP.
+
+The Android-specific patch should centralize socket creation:
+
+- TCP: create `tokio::net::TcpSocket::new_v4()` or `new_v6()`; call the registered protector with `AsRawFd::as_raw_fd()`; if false, return an error; only then connect.
+- UDP: create a raw nonblocking datagram socket with `socket2` (or equivalent) so the descriptor exists before bind; call protect; if false, close and return an error; only then bind/connect and convert to Tokio's UDP socket.
+- Keep non-Android builds on their existing socket path behind `cfg(target_os = "android")`.
+- On Android tunnel runs, a missing callback must be an error, never an implicit unprotected fallback.
+
+The callback must be registered before native run starts and remain valid until the run thread exits. JNI must call `VpnService.protect(fd)` synchronously; asynchronous protection is too late because the socket must not connect first.
+
+### Proxy hostname resolution
+
+There is another pre-TUN dependency: `general_run_async` resolves the proxy address before starting the packet loop. A hostname lookup must use the underlying Android network, not the TUN being established. For the first integration milestone, require a validated numeric proxy IP (the phone-to-phone proxy is normally a LAN address), or resolve it through an explicitly selected Android `Network` before establishing TUN.
+
+### Failure and lifecycle rules
+
+- A false protect result closes the new socket and aborts that connection. Never retry unprotected.
+- On revoke/stop, call native stop, wait for native run to return, then close the Java-owned TUN descriptor and release JNI references.
+- Do not close the TUN descriptor while native code may still read it.
+- Test IPv4/IPv6, TCP/UDP, false callback, exactly-once callback invocation, and stop racing socket creation.
+
+## Safe integration sequence
+
+1. Build and test the patched native library for Android arm64-v8a.
+2. Add the app-owned JNI bridge and test run/stop serialization without establishing a production TUN.
+3. Verify the protect callback with a controlled local proxy endpoint and assert that a failed protect callback aborts startup/connection.
+4. Only then add the TUN builder and packet engine connection.
+5. Keep the feature disabled until device tests cover start, stop, revoke, process death, Wi-Fi/mobile changes, IPv4, IPv6, DNS, TCP, and UDP.
+6. Implement per-app policy separately. Android allow/disallow application lists alone do not implement all four app route modes.
+
+## Current product status
+
+AboEzzat VPN remains a proxy-profile and protected proxy-preflight foundation. No TUN is established, no device traffic is forwarded, and the per-app route selections remain saved preferences only. This document does not change that status.
+
+
+
+==============================================================================
+اسم الملف: docs/TUN_ENGINE_EVALUATION.md
+المجلد: docs
+وظيفة الملف: توثيق هندسي للتكامل والقرارات التقنية.
+الحجم الأصلي: 5442 بايت
+==============================================================================
+# TUN Engine Evaluation — 2026-11-15
+
+## Decision status
+
+**Candidate selected for a proof of concept: heiher/hev-socks5-tunnel. Not integrated into the app yet.**
+
+The current Kotlin packet parsers and flow tracker remain useful for validation and diagnostics, but they are not a replacement for a complete TCP/IP stack. The app must not call VpnService.Builder.establish() until the native engine, proxy adapter, cancellation path, and failure-safe shutdown have been tested together.
+
+## Candidate
+
+Pinned proof-of-concept release: 2.20.0 (2026-11-13).
+
+- Android AAR: hev-socks5-tunnel.aar (617,551 bytes).
+- Published SHA-256: ae8a2e96b80b4eccccd037805a4bb4a278090c89dbcae8bc6fcb7634e9a255b9.
+- Project: https://github.com/heiher/hev-socks5-tunnel
+- Android app reference: https://github.com/heiher/sockstun
+- License reported by both repositories: MIT.
+- Engine capabilities documented upstream: IPv4 and IPv6, TCP forwarding, UDP forwarding, and Android support.
+- Android integration documented upstream: an AAR exposing hev.htproxy.TProxyService native methods:
+  - TProxyStartService(config_path, tun_fd)
+  - TProxyStopService()
+  - TProxyIsRunning()
+  - TProxyGetStats()
+- Upstream release artifacts include Android native builds for arm64-v8a, armeabi-v7a, x86, and x86_64.
+
+## Why this is preferable to writing TCP from scratch
+
+A production TCP/IP data plane must handle sequence numbers, acknowledgements, retransmission, out-of-order segments, congestion/window behavior, FIN/RST lifecycle, IPv4/IPv6, UDP, DNS, and shutdown under network changes. The existing Kotlin parser and lifecycle tracker only inspect packet metadata; they do not implement these transport behaviors.
+
+Hev already provides a mature tun2socks data plane, so a bounded integration proof is safer than continuing to build a partial TCP stack in this repository.
+
+## Blocking compatibility gaps
+
+1. **SOCKS5 upstream only:** Hev's documented tunnel endpoint is SOCKS5. The app also supports HTTP CONNECT profiles. A local SOCKS5-to-upstream adapter would be required for HTTP CONNECT profiles; it must preserve authentication, remote-DNS behavior, cancellation, socket protection, and error reporting.
+2. **Four route modes are not provided by the stock integration:** SocksTun demonstrates global and per-app selection by using Android VpnService.Builder.addAllowedApplication() for one allowlist. This is not the same as independent per-app routing among VPN-only, proxy-only, proxy-then-VPN, and direct bypass.
+3. **One Android VPN interface:** Android permits one active VPN interface per Android user/profile. Excluding an app from the VPN makes it use the normal system network; it does not automatically send it through the upstream proxy.
+4. **UDP depends on upstream support:** Hev can forward UDP, but a SOCKS5 server must support UDP ASSOCIATE or a supported UDP-over-TCP mode. An HTTP CONNECT-only proxy cannot carry arbitrary UDP.
+5. **Native supply-chain review:** Before vendoring source or consuming a prebuilt AAR, pin an exact upstream release/commit, verify checksums, inspect the full dependency/submodule license set, and build/test all required ABIs in this repository's CI.
+
+## Proposed proof-of-concept sequence
+
+1. Pin one Hev release and record its checksum and full third-party license inventory.
+2. Add the native artifact behind a disabled build feature; do not establish a TUN yet.
+3. Build a local SOCKS5 adapter with loopback-only binding and integration tests:
+   - SOCKS5 CONNECT -> existing SOCKS5 upstream.
+   - SOCKS5 CONNECT -> HTTP CONNECT upstream.
+   - authentication success/failure.
+   - remote DNS and local DNS behavior.
+   - bounded sockets, cancellation, and no credential logging.
+4. Create a test-only VpnService path that establishes a TUN only after explicit user consent and starts Hev immediately with the descriptor.
+5. Verify stop/revoke/error behavior always stops the native engine before closing the descriptor, and that the upstream socket is protected from VPN recursion.
+6. Test IPv4 TCP, IPv6 TCP, DNS, UDP, Wi-Fi/mobile network changes, upstream disconnects, and device reboot on physical Android devices.
+7. Only after the single-route data plane is stable, design the per-app policy extension. Do not claim the four route modes are implemented until each mode has a separate end-to-end test.
+
+## Per-app routing design constraint
+
+The stock SocksTun approach uses an allowlist: selected packages are placed inside the TUN; all other packages remain outside it. That is useful for a first single-route proof, but it cannot independently enforce four different routes. A later design must either:
+
+- extend the native packet engine with a verified per-flow routing callback and a safe app-UID attribution strategy; or
+- use a different architecture that can maintain the required per-app routes without creating a second Android VPN interface.
+
+Do not assume ConnectivityManager.getConnectionOwnerUid() can always identify the owner of the first SYN observed on a TUN. This must be validated on supported Android versions before relying on it for route decisions.
+
+## Explicit non-goals for this proof
+
+- No silent VPN start.
+- No VpnService.Builder.establish() from the existing placeholder service.
+- No claim of banking-app acceptance or guaranteed bypass.
+- No claim that HTTP CONNECT supports UDP.
+- No release APK presented as a functioning VPN until device-level traffic tests pass.
+
+
+
+==============================================================================
+اسم الملف: docs/TUN2PROXY_UPSTREAM_PIN.md
+المجلد: docs
+وظيفة الملف: توثيق هندسي للتكامل والقرارات التقنية.
+الحجم الأصلي: 4511 بايت
+==============================================================================
+# tun2proxy upstream pin and Android integration status
+
+## Audited upstream revision
+
+- Repository: https://github.com/tun2proxy/tun2proxy
+- Tag: `v0.8.7`
+- Immutable commit: `b7cd433a25bcd131e7994163874bbbad4834eb3e`
+- Cargo package: `tun2proxy 0.8.7`
+- License declared by Cargo.toml: MIT
+- Rust edition: 2024
+- Minimum Rust version: 1.90
+- Library crate types: `staticlib`, `cdylib`, `lib`
+
+The MIT license text must be retained with any vendored or modified source.
+
+## Integration status in AboEzzat VPN
+
+This revision is now vendored under `native/tun2proxy/`, with the upstream MIT license retained. The AboEzzat Android socket-protection patch is in `native/tun2proxy/src/lib.rs`; see `native/tun2proxy/UPSTREAM.md` for the exact provenance and verification boundary.
+
+The Rust socket factories now create TCP sockets unconnected and UDP sockets unbound, invoke the app-owned `abz_protect_socket_fd(fd)` callback, and fail closed before connect/bind when protection fails. The Rust engine has been cross-compiled for `arm64-v8a`, `armeabi-v7a`, and `x86_64`, linked into the `abz_protector` JNI shared library, and included in a successful debug APK build.
+
+The Android service now has user-initiated start/stop actions. It resolves the upstream proxy host before creating the VPN route, establishes a dual-stack Android TUN interface, configures virtual DNS or DNS-over-TCP according to the saved profile, and starts the blocking Rust engine on a dedicated worker. A foreground notification represents the active tunnel. The TUN descriptor is retained until the native run call returns; JNI start arming, cancellation, and stop transitions are serialized to cover early-stop races.
+
+The current tunnel is a **whole-device upstream-proxy tunnel**. Saved per-app route policies are not yet enforced. TCP is proxied; general UDP support depends on SOCKS5 UDP ASSOCIATE and is not available through ordinary HTTP CONNECT. Physical-device traffic, DNS, reconnect, revocation, and background lifecycle tests are still pending.
+
+## Required patch points
+
+The central functions in `src/lib.rs` are:
+
+- `create_tcp_stream(...)`
+- `create_udp_stream(...)`
+
+The Android patch must:
+1. Create TCP sockets unconnected, call the synchronous protector on the raw fd, then connect.
+2. Create UDP sockets unbound, protect the raw fd, then bind/connect.
+3. Abort and close the socket if protection returns false or errors.
+4. Cover IPv4 and IPv6, proxy endpoint resolution, DNS, and any UDP gateway sockets.
+5. Audit all dependency and feature paths for sockets created outside these factories.
+
+The Java/Kotlin callback endpoint and a first app-owned JNI bridge are now present. The JNI shared library exposes `abz_protect_socket_fd(int)` and calls
+`AboEzzatVpnService.protectNativeSocket(fd)`. It delegates to the tested,
+fail-closed `NativeSocketProtection` boundary. The JNI callback handles native
+thread attachment, synchronous Java calls, Java exceptions, and in-flight
+reference teardown. The JNI layer now calls the `tun2proxy_run_with_cli_args` and `tun2proxy_stop` C ABI functions. The service must still enforce run/stop lifetime ordering and keep the TUN descriptor alive until the native run function has returned.
+
+## Android build prerequisites for the native phase
+
+The GitHub Actions workflow installs Rust 1.90, runs host-side Rust library tests and Android target checks, builds release static libraries for all three shipped Android ABIs, links each static library into the JNI shared library, and assembles the debug APK. Run `43716191472` completed successfully and uploaded `AboEzzat-VPN-debug`. Later service and lifecycle changes are being revalidated by CI; a successful build does not prove execution on a physical Android device.
+
+The Kotlin `Tun2ProxyCommandBuilder` creates the native CLI for HTTP CONNECT and SOCKS5 profiles, percent-encodes credentials, brackets IPv6 proxy hosts, selects virtual DNS or DNS-over-TCP, and passes the TUN descriptor with `--close-fd-on-drop false` so the service retains descriptor ownership. Unit tests cover these cases.
+
+## Feature gate
+
+The service now calls `VpnService.Builder.establish()` only after the user initiates connection and Android grants VPN consent. Do not describe this as production-ready until physical-device tests confirm packet forwarding, proxy authentication, DNS behavior, socket protection, stop/revoke cleanup, and no routing loops. Per-app policies remain stored-only; the currently wired mode applies to the whole device.
+
+
+
+==============================================================================
+اسم الملف: gradle.properties
+المجلد: جذر المشروع
+وظيفة الملف: إعدادات بناء أو ملف مصدر/توثيق للمشروع.
+الحجم الأصلي: 125 بايت
+==============================================================================
+org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+org.gradle.parallel=true
+android.useAndroidX=true
+kotlin.code.style=official
+
+
+
+==============================================================================
+اسم الملف: native/tun2proxy/build.rs
+المجلد: native/tun2proxy
+وظيفة الملف: إعدادات بناء وتوثيق محرك Rust.
+الحجم الأصلي: 4022 بايت
+==============================================================================
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if let Ok(git_hash) = get_git_hash() {
+        // Set the environment variables
+        println!("cargo:rustc-env=GIT_HASH={}", git_hash.trim());
+    }
+
+    // Get the build time
+    let build_time = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    println!("cargo:rustc-env=BUILD_TIME={build_time}");
+
+    #[cfg(target_os = "windows")]
+    if let Ok(cargo_target_dir) = get_cargo_target_dir() {
+        let mut f = std::fs::File::create(cargo_target_dir.join("build.log"))?;
+        use std::io::Write;
+        f.write_all(format!("CARGO_TARGET_DIR: '{}'\r\n", cargo_target_dir.display()).as_bytes())?;
+
+        // The wintun-bindings crate's root directory
+        let crate_dir = get_crate_dir("wintun-bindings")?;
+
+        // The path to the DLL file, relative to the crate root, depending on the target architecture
+        let dll_path = get_wintun_bin_relative_path()?;
+        let src_path = crate_dir.join(dll_path);
+
+        let dst_path = cargo_target_dir.join("wintun.dll");
+
+        f.write_all(format!("Source path: '{}'\r\n", src_path.display()).as_bytes())?;
+        f.write_all(format!("Target path: '{}'\r\n", dst_path.display()).as_bytes())?;
+
+        // Copy to the target directory
+        if let Err(e) = std::fs::copy(src_path, &dst_path) {
+            f.write_all(format!("Failed to copy 'wintun.dll': {e}\r\n").as_bytes())?;
+        } else {
+            f.write_all(format!("Copied 'wintun.dll' to '{}'\r\n", dst_path.display()).as_bytes())?;
+
+            // Set the modified time to the current time, or the publishing process will fail.
+            let file = std::fs::OpenOptions::new().write(true).open(&dst_path)?;
+            file.set_modified(std::time::SystemTime::now())?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn get_cargo_target_dir() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR")?);
+    let profile = std::env::var("PROFILE")?;
+    let mut target_dir = None;
+    let mut sub_path = out_dir.as_path();
+    while let Some(parent) = sub_path.parent() {
+        if parent.ends_with(&profile) {
+            target_dir = Some(parent);
+            break;
+        }
+        sub_path = parent;
+    }
+    Ok(target_dir.ok_or("not found")?.to_path_buf())
+}
+
+#[allow(dead_code)]
+fn get_wintun_bin_relative_path() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH")?;
+
+    let dll_path = match target_arch.as_str() {
+        "x86" => "wintun/bin/x86/wintun.dll",
+        "x86_64" => "wintun/bin/amd64/wintun.dll",
+        "arm" => "wintun/bin/arm/wintun.dll",
+        "aarch64" => "wintun/bin/arm64/wintun.dll",
+        _ => return Err("Unsupported architecture".into()),
+    };
+
+    Ok(dll_path.into())
+}
+
+#[allow(dead_code)]
+fn get_crate_dir(crate_name: &str) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    let output = std::process::Command::new("cargo")
+        .arg("metadata")
+        .arg("--format-version=1")
+        .output()?;
+
+    let metadata = serde_json::from_slice::<serde_json::Value>(&output.stdout)?;
+    let packages = metadata["packages"].as_array().ok_or("packages")?;
+
+    let mut crate_dir = None;
+
+    for package in packages {
+        let name = package["name"].as_str().ok_or("name")?;
+        if name == crate_name {
+            let path = package["manifest_path"].as_str().ok_or("manifest_path")?;
+            let path = std::path::PathBuf::from(path);
+            crate_dir = Some(path.parent().ok_or("parent")?.to_path_buf());
+            break;
+        }
+    }
+    Ok(crate_dir.ok_or("crate_dir")?)
+}
+
+fn get_git_hash() -> std::io::Result<String> {
+    use std::process::Command;
+    let git_hash = Command::new("git").args(["rev-parse", "--short", "HEAD"]).output()?.stdout;
+    let git_hash = String::from_utf8(git_hash).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(git_hash)
+}
+
+
+
+==============================================================================
+اسم الملف: native/tun2proxy/Cargo.toml
+المجلد: native/tun2proxy
+وظيفة الملف: إعدادات بناء وتوثيق محرك Rust.
+الحجم الأصلي: 2853 بايت
+==============================================================================
+[package]
+name = "tun2proxy"
+version = "0.8.7"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/tun2proxy/tun2proxy"
+homepage = "https://github.com/tun2proxy/tun2proxy"
+authors = ["B. Blechschmidt", "ssrlive"]
+description = "Tunnel interface to proxy"
+readme = "README.md"
+rust-version = "1.90"
+default-run = "tun2proxy-bin"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[[bin]]
+name = "tun2proxy-bin"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "udpgw-server"
+path = "src/bin/udpgw_server.rs"
+required-features = ["udpgw"]
+
+[features]
+default = ["udpgw", "unshare"]
+udpgw = []
+unshare = ["tokio/process", "bincode-next"]
+
+[dependencies]
+async-trait = "0.1.92"
+base64easy = "0.1.7"
+chrono = { version = "0.4.45", default-features = false, features = [
+    "clock",
+    "std",
+] }
+clap = { version = "4.6.7", default-features = false, features = [
+    "std",
+    "help",
+    "usage",
+    "error-context",
+    "derive",
+    "suggestions",
+    "wrap_help",
+] }
+ctrlc2 = { version = "4.0.0", default-features = false, features = [
+    "async",
+    "termination",
+] }
+digest_auth = "0.3.1"
+dotenvy = "0.15.7"
+env_logger = { version = "0.11.11", default-features = false, features = [
+    "humantime",
+    "color",
+    "auto-color",
+] }
+hashlink = "0.12.2"
+hickory-proto = "0.26.3"
+httparse = "1.10.1"
+ipstack = { version = "1.0.1" }
+log = { version = "0.4.35", default-features = false, features = [
+    "std",
+    "serde",
+] }
+percent-encoding = "2.3.2"
+serde = { version = "1.0.229", features = ["derive"] }
+shlex = "2.0.1"
+socks5-impl = { version = "0.10.3", default-features = false, features = [
+    "protocol",
+    "tokio",
+    "serde",
+] }
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", default-features = false, features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "time",
+    "io-util",
+    "sync",
+] }
+tokio-util = "0.7.20"
+tproxy-config = { version = "^7.0.9", default-features = false }
+tun = { version = "0.8.14", features = ["async"] }
+udp-stream = { version = "0.0.13", default-features = false }
+unicase = "2.10.0"
+url = "2.5.8"
+socket2 = "0.6.3"
+
+[target.'cfg(target_os="android")'.dependencies]
+android_logger = "0.15.1"
+jni = { version = "0.22.4", default-features = false }
+
+[target.'cfg(target_os="linux")'.dependencies]
+bincode-next = { version = "3.1.1", optional = true }
+tokio = { version = "1.54.1", default-features = false, optional = true, features = [
+    "process",
+] }
+
+[target.'cfg(target_os="windows")'.dependencies]
+windows-service = "0.8.1"
+
+[target.'cfg(unix)'.dependencies]
+daemonize = "0.5.0"
+nix = { version = "0.31.3", default-features = false, features = [
+    "fs",
+    "socket",
+    "uio",
+] }
+
+[build-dependencies]
+chrono = { version = "0.4.45", default-features = false, features = [
+    "clock",
+    "std",
+] }
+serde_json = "1.0.154"
+
+# [profile.release]
+# strip = "symbols"
+
