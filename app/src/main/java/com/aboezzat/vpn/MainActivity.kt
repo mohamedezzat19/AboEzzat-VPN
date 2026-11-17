@@ -1336,7 +1336,7 @@ private fun ConnectionCircle(
     }
     val statusText = when {
         connecting -> "Connecting…"
-        connected == true -> "Connected"
+        connected == true -> "Running"
         else -> "Disconnected"
     }
     Column(
