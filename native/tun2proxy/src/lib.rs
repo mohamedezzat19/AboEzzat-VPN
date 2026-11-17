@@ -810,7 +810,12 @@ async fn handle_virtual_dns_tcp_session(
             break;
         }
         for query in decode_dns_tcp_queries(&mut pending, &buf[..len])? {
+            let qtype = dns_query_type_label(&query);
             let synthetic_query = dns.lock().await.is_synthetic_query(&query)?;
+            report_native_diagnostic(&format!(
+                "DNS TCP request: qtype={qtype}, path={}",
+                if synthetic_query { "synthetic" } else { "upstream" }
+            ));
             let response = if synthetic_query {
                 let (response, qname, ip) = dns.lock().await.generate_query(&query)?;
                 log::debug!("Virtual DNS-over-TCP query: {qname} -> {ip}");
@@ -919,7 +924,12 @@ async fn handle_virtual_dns_session(
         }
 
         let query = &buf[..len];
+        let qtype = dns_query_type_label(query);
         let synthetic_query = dns.lock().await.is_synthetic_query(query)?;
+        report_native_diagnostic(&format!(
+            "DNS UDP request: qtype={qtype}, path={}",
+            if synthetic_query { "synthetic" } else { "upstream" }
+        ));
         let response = if synthetic_query {
             let (message, qname, ip) = dns.lock().await.generate_query(query)?;
             log::debug!("Virtual DNS query: {qname} -> {ip}");
