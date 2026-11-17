@@ -1,0 +1,771 @@
+AboEzzat VPN — التجميع النصي لمصادر المشروع
+Repository: https://github.com/mohamedezzat19/AboEzzat-VPN
+Branch snapshot: main
+Commit: f67a28ce832880a1fb48fbea70f520d650ae24d2
+تاريخ التجميع: 2026-11-17
+
+هذا الملف يجمع محتويات الملفات النصية للمشروع مع المسار ووصف وظيفة كل ملف. الملفات الثنائية (صور، APK، JAR، مكتبات مترجمة) لا يمكن عرضها ككود نصي، ولم تُدرج محتوياتها. هذا التجميع لقطة ثابتة من commit المذكور ولا يتحدث تلقائيًا.
+
+================ فهرس الملفات النصية ================
+.github/workflows/android.yml (5796 bytes)
+.gitignore (122 bytes)
+app/build.gradle.kts (1761 bytes)
+app/src/main/AndroidManifest.xml (2470 bytes)
+app/src/main/cpp/CMakeLists.txt (1352 bytes)
+app/src/main/cpp/native_socket_protector.cpp (10115 bytes)
+app/src/main/cpp/native_socket_protector.h (244 bytes)
+app/src/main/java/com/aboezzat/vpn/ConnectionDiagnostics.kt (1186 bytes)
+app/src/main/java/com/aboezzat/vpn/core/AppRoutePolicyResolver.kt (2298 bytes)
+app/src/main/java/com/aboezzat/vpn/core/RouteMode.kt (348 bytes)
+app/src/main/java/com/aboezzat/vpn/data/AndroidUidPackageLookup.kt (768 bytes)
+app/src/main/java/com/aboezzat/vpn/data/AppRouteStore.kt (1055 bytes)
+app/src/main/java/com/aboezzat/vpn/data/ProxyProfileStore.kt (5032 bytes)
+app/src/main/java/com/aboezzat/vpn/MainActivity.kt (98102 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/ProxyConnectionTester.kt (9132 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/ProxyProfile.kt (743 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/ProxyTcpRelay.kt (1881 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/ProxyTcpTunnel.kt (8802 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/ProxyTcpTunnelManager.kt (3789 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/ProxyTestRequestParser.kt (941 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/Socks5UdpAssociateTester.kt (8990 bytes)
+app/src/main/java/com/aboezzat/vpn/proxy/TcpStreamRelay.kt (3788 bytes)
+app/src/main/java/com/aboezzat/vpn/update/GitHubReleaseUpdater.kt (5335 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/AboEzzatVpnService.kt (24578 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/AndroidConnectionOwnerUidResolver.kt (2786 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/ConnectionRouteDecisionEngine.kt (1725 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/DnsOverTlsForwarder.kt (3788 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/DnsQueryParser.kt (4664 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/DnsTcpForwarder.kt (3975 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/DnsUdpTcpBridge.kt (7058 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/Ipv4ConnectionTupleParser.kt (4498 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/Ipv4TcpPacketParser.kt (5929 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketCodec.kt (8169 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketLoop.kt (2570 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketProcessor.kt (1175 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/NativeSocketProtection.kt (572 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/NativeSocketProtectorBridge.kt (1267 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/NativeTunnelRunner.kt (1930 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/TcpFlowLifecycleTracker.kt (6918 bytes)
+app/src/main/java/com/aboezzat/vpn/vpn/Tun2ProxyCommandBuilder.kt (2910 bytes)
+app/src/main/res/drawable/ic_aboezzat_vpn.xml (917 bytes)
+app/src/main/res/values-ar/strings.xml (80 bytes)
+app/src/main/res/values/strings.xml (75 bytes)
+app/src/main/res/values/styles.xml (414 bytes)
+app/src/main/res/xml/locales_config.xml (197 bytes)
+app/src/main/res/xml/update_file_paths.xml (169 bytes)
+app/src/test/java/com/aboezzat/vpn/core/AppRoutePolicyResolverTest.kt (2707 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/ProxyConnectionTesterTest.kt (10258 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/ProxyProfileTest.kt (1387 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/ProxyTcpRelayTest.kt (3352 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/ProxyTcpTunnelManagerTest.kt (3460 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/ProxyTcpTunnelTest.kt (8528 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/ProxyTestRequestParserTest.kt (1848 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/Socks5UdpAssociateTesterTest.kt (3614 bytes)
+app/src/test/java/com/aboezzat/vpn/proxy/TcpStreamRelayTest.kt (2712 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/ConnectionRouteDecisionEngineTest.kt (3213 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/DnsOverTlsForwarderTest.kt (1990 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/DnsQueryParserTest.kt (3161 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/DnsTcpForwarderTest.kt (4654 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/DnsUdpTcpBridgeTest.kt (4858 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/Ipv4ConnectionTupleParserTest.kt (3491 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/Ipv4TcpPacketParserTest.kt (5072 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketCodecTest.kt (5623 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketLoopTest.kt (4454 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketProcessorTest.kt (3104 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/NativeSocketProtectionTest.kt (858 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/NativeTunnelRunnerTest.kt (3939 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/TcpFlowLifecycleTrackerTest.kt (8940 bytes)
+app/src/test/java/com/aboezzat/vpn/vpn/Tun2ProxyCommandBuilderTest.kt (2434 bytes)
+build.gradle.kts (217 bytes)
+docs/ANDROID_JNI_BRIDGE_CONTRACT.md (5415 bytes)
+docs/ANDROID_NATIVE_TUNNEL_INTEGRATION.md (6883 bytes)
+docs/TUN_ENGINE_EVALUATION.md (5442 bytes)
+docs/TUN2PROXY_UPSTREAM_PIN.md (4511 bytes)
+gradle.properties (125 bytes)
+native/tun2proxy/build.rs (4022 bytes)
+native/tun2proxy/Cargo.toml (2853 bytes)
+native/tun2proxy/README.md (14660 bytes)
+native/tun2proxy/src/android.rs (2467 bytes)
+native/tun2proxy/src/args.rs (11383 bytes)
+native/tun2proxy/src/bin/main.rs (6953 bytes)
+native/tun2proxy/src/bin/udpgw_server.rs (33900 bytes)
+native/tun2proxy/src/directions.rs (681 bytes)
+native/tun2proxy/src/dns.rs (2689 bytes)
+native/tun2proxy/src/dump_logger.rs (2660 bytes)
+native/tun2proxy/src/error.rs (2030 bytes)
+native/tun2proxy/src/general_api.rs (10339 bytes)
+native/tun2proxy/src/http.rs (19905 bytes)
+native/tun2proxy/src/lib.rs (49524 bytes)
+native/tun2proxy/src/no_proxy.rs (2973 bytes)
+native/tun2proxy/src/proxy_handler.rs (1162 bytes)
+native/tun2proxy/src/session_info.rs (1573 bytes)
+native/tun2proxy/src/socket_transfer.rs (9003 bytes)
+native/tun2proxy/src/socks.rs (14733 bytes)
+native/tun2proxy/src/traffic_status.rs (3162 bytes)
+native/tun2proxy/src/udpgw.rs (31698 bytes)
+native/tun2proxy/src/virtual_dns.rs (8458 bytes)
+native/tun2proxy/src/win_svc.rs (5009 bytes)
+native/tun2proxy/UPSTREAM.md (2444 bytes)
+README.md (4659 bytes)
+settings.gradle.kts (331 bytes)
+
+================ بداية الأكواد ================
+
+
+==============================================================================
+اسم الملف: .github/workflows/android.yml
+المجلد: .github/workflows
+وظيفة الملف: إعدادات أتمتة البناء والنشر عبر GitHub Actions.
+الحجم الأصلي: 5796 بايت
+==============================================================================
+name: Android Release Build
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: abo-vpn-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Build signed Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Rust 1.90
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: 1.90.0
+          components: rustfmt
+
+      - name: Test tun2proxy core
+        run: cargo test --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features
+
+      - name: Check Rust engine for Android ABIs
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          cargo check --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features --features udpgw --target aarch64-linux-android
+          cargo check --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features --features udpgw --target armv7-linux-androideabi
+          cargo check --manifest-path native/tun2proxy/Cargo.toml --lib --no-default-features --features udpgw --target x86_64-linux-android
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.2.12479018 cmake;3.22.1"
+
+      - name: Build tun2proxy for Android ABIs
+        run: |
+          NDK_BIN="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$NDK_BIN/aarch64-linux-android26-clang" cargo build --manifest-path native/tun2proxy/Cargo.toml --lib --release --no-default-features --features udpgw --target aarch64-linux-android
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$NDK_BIN/armv7a-linux-androideabi26-clang" cargo build --manifest-path native/tun2proxy/Cargo.toml --lib --release --no-default-features --features udpgw --target armv7-linux-androideabi
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$NDK_BIN/x86_64-linux-android26-clang" cargo build --manifest-path native/tun2proxy/Cargo.toml --lib --release --no-default-features --features udpgw --target x86_64-linux-android
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build Release APK
+        run: gradle -PAPP_VERSION_CODE=${{ github.run_number }} -PAPP_VERSION_NAME=0.1.${{ github.run_number }} :app:testReleaseUnitTest :app:assembleRelease
+
+      - name: Check signing configuration
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret: $name"
+              exit 1
+            fi
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aboezzat-release.p12"
+          test -s "$RUNNER_TEMP/aboezzat-release.p12"
+          echo "Decoded keystore size: $(wc -c < "$RUNNER_TEMP/aboezzat-release.p12") bytes"
+          echo "Keystore header (first 4 bytes): $(od -An -tx1 -N4 "$RUNNER_TEMP/aboezzat-release.p12" | tr -d ' \n')"
+          keytool -list -keystore "$RUNNER_TEMP/aboezzat-release.p12" -storetype PKCS12 -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS"
+          echo "Keystore format, password, and alias validated."
+
+      - name: Align and sign Release APK
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+          ALIGNED="$RUNNER_TEMP/app-release-aligned.apk"
+          SIGNED="app/build/outputs/apk/release/app-release.apk"
+          test -s "$UNSIGNED"
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" sign --ks-type PKCS12 --ks "$RUNNER_TEMP/aboezzat-release.p12" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD --out "$SIGNED" "$ALIGNED"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$SIGNED"
+
+      - name: Name signed Release APK
+        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/AboEzzat-VPN.apk
+
+      - name: Upload signed Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AboEzzat-VPN-Release
+          path: app/build/outputs/apk/release/AboEzzat-VPN.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release for in-app updates
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.${{ github.run_number }}
+          name: AboEzzat VPN v0.1.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          body: |
+            versionCode: ${{ github.run_number }}
+
+            Signed Android Release APK. Install from the app's built-in updater.
+          files: app/build/outputs/apk/release/AboEzzat-VPN.apk
+
+
+
+==============================================================================
+اسم الملف: .gitignore
+المجلد: جذر المشروع
+وظيفة الملف: إعدادات بناء أو ملف مصدر/توثيق للمشروع.
+الحجم الأصلي: 122 بايت
+==============================================================================
+*.iml
+.gradle/
+.idea/
+local.properties
+.DS_Store
+/build/
+**/build/
+.externalNativeBuild/
+.cxx/
+captures/
+*.jks
+*.keystore
+
+
+
+==============================================================================
+اسم الملف: app/build.gradle.kts
+المجلد: app
+وظيفة الملف: إعدادات بناء أو ملف مصدر/توثيق للمشروع.
+الحجم الأصلي: 1761 بايت
+==============================================================================
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
+
+val releaseVersionCode = providers.gradleProperty("APP_VERSION_CODE").orNull?.toIntOrNull() ?: 1
+val releaseVersionName = providers.gradleProperty("APP_VERSION_NAME").orNull ?: "0.1.0"
+
+android {
+    namespace = "com.aboezzat.vpn"
+    compileSdk = 35
+    ndkVersion = "27.2.12479018"
+
+    defaultConfig {
+        applicationId = "com.aboezzat.vpn"
+        minSdk = 26
+        targetSdk = 35
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    buildFeatures {
+        compose = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+dependencies {
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    testImplementation("junit:junit:4.13.2")
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/AndroidManifest.xml
+المجلد: app/src/main
+وظيفة الملف: إعدادات بناء أو ملف مصدر/توثيق للمشروع.
+الحجم الأصلي: 2470 بايت
+==============================================================================
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/ic_aboezzat_vpn"
+        android:roundIcon="@drawable/ic_aboezzat_vpn"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:localeConfig="@xml/locales_config"
+        android:theme="@style/AppTheme">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
+            android:enabled="false"
+            android:exported="false">
+            <meta-data android:name="autoStoreLocales" android:value="true" />
+        </service>
+        <service
+            android:name=".vpn.AboEzzatVpnService"
+            android:exported="false"
+            android:foregroundServiceType="systemExempted"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>
+
+
+
+==============================================================================
+اسم الملف: app/src/main/cpp/CMakeLists.txt
+المجلد: app/src/main/cpp
+وظيفة الملف: كود C/C++ الأصلي وجسر JNI مع Android.
+الحجم الأصلي: 1352 بايت
+==============================================================================
+cmake_minimum_required(VERSION 3.22.1)
+project(abz_protector LANGUAGES CXX)
+
+add_library(abz_protector SHARED
+    native_socket_protector.cpp
+)
+
+target_compile_features(abz_protector PRIVATE cxx_std_17)
+target_compile_options(abz_protector PRIVATE
+    -Wall
+    -Wextra
+    -Werror
+)
+
+# The Rust static library is built for the selected Android ABI by CI before
+# Gradle invokes CMake. Refuse to produce a JNI-only APK if it is missing.
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    set(TUN2PROXY_RUST_TARGET "aarch64-linux-android")
+elseif(ANDROID_ABI STREQUAL "armeabi-v7a")
+    set(TUN2PROXY_RUST_TARGET "armv7-linux-androideabi")
+elseif(ANDROID_ABI STREQUAL "x86_64")
+    set(TUN2PROXY_RUST_TARGET "x86_64-linux-android")
+else()
+    message(FATAL_ERROR "Unsupported Android ABI for tun2proxy: ${ANDROID_ABI}")
+endif()
+
+set(TUN2PROXY_STATIC_LIB
+    "${CMAKE_CURRENT_LIST_DIR}/../../../../native/tun2proxy/target/${TUN2PROXY_RUST_TARGET}/release/libtun2proxy.a"
+)
+if(NOT EXISTS "${TUN2PROXY_STATIC_LIB}")
+    message(FATAL_ERROR "Missing patched tun2proxy static library: ${TUN2PROXY_STATIC_LIB}")
+endif()
+
+add_library(tun2proxy_rust STATIC IMPORTED GLOBAL)
+set_target_properties(tun2proxy_rust PROPERTIES
+    IMPORTED_LOCATION "${TUN2PROXY_STATIC_LIB}"
+)
+
+target_link_libraries(abz_protector PRIVATE
+    tun2proxy_rust
+    log
+    android
+    dl
+    m
+)
+
+
+
+==============================================================================
+اسم الملف: app/src/main/cpp/native_socket_protector.cpp
+المجلد: app/src/main/cpp
+وظيفة الملف: كود C/C++ الأصلي وجسر JNI مع Android.
+الحجم الأصلي: 10115 بايت
+==============================================================================
+#include <jni.h>
+#include <android/log.h>
+#include <condition_variable>
+#include <cstdint>
+#include <mutex>
+#include <string>
+
+extern "C" int tun2proxy_run_with_cli_args(const char* cli_args, unsigned short tun_mtu, bool packet_information);
+extern "C" int tun2proxy_stop();
+extern "C" void tun2proxy_clear_stop_request();
+
+struct Tun2ProxyTrafficStatus { uint64_t tx; uint64_t rx; };
+using Tun2ProxyTrafficCallback = void (*)(const Tun2ProxyTrafficStatus*, void*);
+extern "C" void tun2proxy_set_traffic_status_callback(uint32_t, Tun2ProxyTrafficCallback, void*);
+
+namespace {
+constexpr const char* kLogTag = "AboEzzatSocketProtect";
+#define PROTECT_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, kLogTag, __VA_ARGS__)
+JavaVM* g_vm = nullptr;
+std::mutex g_mutex;
+std::condition_variable g_idle;
+jobject g_service = nullptr;
+jmethodID g_protect_method = nullptr;
+jmethodID g_traffic_method = nullptr;
+unsigned int g_in_flight = 0;
+bool g_shutting_down = false;
+std::mutex g_engine_mutex;
+bool g_engine_running = false;
+bool g_engine_pending_start = false;
+bool g_engine_stop_requested = false;
+
+bool protect_fd(JNIEnv* env, jobject service, jmethodID method, int fd) {
+    if (fd < 0 || service == nullptr || method == nullptr) {
+        PROTECT_LOGE("protect callback unavailable: fd=%d service=%p method=%p", fd, service, method);
+        return false;
+    }
+    const jboolean allowed = env->CallBooleanMethod(service, method, static_cast<jint>(fd));
+    if (env->ExceptionCheck()) {
+        PROTECT_LOGE("Java protectNativeSocket threw for fd=%d", fd);
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        return false;
+    }
+    if (allowed != JNI_TRUE) {
+        PROTECT_LOGE("VpnService.protect returned false for fd=%d", fd);
+        return false;
+    }
+    return true;
+}
+
+void on_native_traffic_status(const Tun2ProxyTrafficStatus* status, void*) {
+    if (status == nullptr || g_vm == nullptr) return;
+
+    jobject service = nullptr;
+    jmethodID method = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_shutting_down || g_service == nullptr || g_traffic_method == nullptr) return;
+        ++g_in_flight;
+        service = g_service;
+        method = g_traffic_method;
+    }
+
+    JNIEnv* env = nullptr;
+    bool attached_here = false;
+    const jint get_env = g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (get_env == JNI_EDETACHED) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached_here = true;
+        } else {
+            PROTECT_LOGE("AttachCurrentThread failed in traffic callback");
+        }
+    } else if (get_env != JNI_OK) {
+        PROTECT_LOGE("GetEnv failed (%d) in traffic callback", get_env);
+        env = nullptr;
+    }
+
+    if (env != nullptr) {
+        env->CallVoidMethod(service, method, static_cast<jlong>(status->tx), static_cast<jlong>(status->rx));
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
+    if (attached_here) g_vm->DetachCurrentThread();
+
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_in_flight > 0) --g_in_flight;
+        if (g_in_flight == 0) g_idle.notify_all();
+    }
+}
+
+bool protect_fd_from_native(int fd) {
+    if (fd < 0 || g_vm == nullptr) { PROTECT_LOGE("invalid fd or JavaVM: fd=%d vm=%p", fd, g_vm); return false; }
+
+    jobject service = nullptr;
+    jmethodID method = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_shutting_down || g_service == nullptr || g_protect_method == nullptr) {
+            PROTECT_LOGE("service callback not bound: fd=%d shutting_down=%d service=%p method=%p", fd, g_shutting_down, g_service, g_protect_method);
+            return false;
+        }
+        ++g_in_flight;
+        service = g_service;
+        method = g_protect_method;
+    }
+
+    JNIEnv* env = nullptr;
+    bool attached_here = false;
+    bool allowed = false;
+    const jint get_env = g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (get_env == JNI_EDETACHED) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+            attached_here = true;
+        } else {
+            PROTECT_LOGE("AttachCurrentThread failed for fd=%d", fd);
+        }
+    } else if (get_env != JNI_OK) {
+        PROTECT_LOGE("GetEnv failed (%d) for fd=%d", get_env, fd);
+        env = nullptr;
+    }
+
+    if (env != nullptr) {
+        allowed = protect_fd(env, service, method, fd);
+    } else {
+        PROTECT_LOGE("JNIEnv unavailable for fd=%d", fd);
+    }
+
+    if (attached_here) {
+        g_vm->DetachCurrentThread();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_in_flight > 0) --g_in_flight;
+        if (g_in_flight == 0) g_idle.notify_all();
+    }
+    return allowed;
+}
+}  // namespace
+
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
+    g_vm = vm;
+    return JNI_VERSION_1_6;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeBindService(
+        JNIEnv* env, jclass, jobject service) {
+    if (env == nullptr || service == nullptr) return JNI_FALSE;
+
+    jclass service_class = env->GetObjectClass(service);
+    if (service_class == nullptr) return JNI_FALSE;
+    jmethodID method = env->GetMethodID(service_class, "protectNativeSocket", "(I)Z");
+    jmethodID traffic_method = env->GetMethodID(service_class, "onNativeTrafficStatus", "(JJ)V");
+    env->DeleteLocalRef(service_class);
+    if (method == nullptr || traffic_method == nullptr || env->ExceptionCheck()) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return JNI_FALSE;
+    }
+
+    jobject global_service = env->NewGlobalRef(service);
+    if (global_service == nullptr) return JNI_FALSE;
+
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_service != nullptr || g_shutting_down || g_in_flight != 0) {
+        env->DeleteGlobalRef(global_service);
+        return JNI_FALSE;
+    }
+    g_service = global_service;
+    g_protect_method = method;
+    g_traffic_method = traffic_method;
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeUnbindService(
+        JNIEnv* env, jclass) {
+    jobject old_service = nullptr;
+    {
+        std::unique_lock<std::mutex> lock(g_mutex);
+        g_shutting_down = true;
+        g_idle.wait(lock, [] { return g_in_flight == 0; });
+        old_service = g_service;
+        g_service = nullptr;
+        g_protect_method = nullptr;
+        g_traffic_method = nullptr;
+        g_shutting_down = false;
+    }
+    if (env != nullptr && old_service != nullptr) {
+        env->DeleteGlobalRef(old_service);
+    }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeProtectSocket(
+        JNIEnv*, jclass, jint fd) {
+    return protect_fd_from_native(static_cast<int>(fd)) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Stable C ABI for the patched tun2proxy socket factory.
+// A missing service or a failed Java protection call always fails closed.
+extern "C" bool abz_protect_socket_fd(int fd) {
+    return protect_fd_from_native(fd);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeArmEngineStart(
+        JNIEnv*, jclass) {
+    std::lock_guard<std::mutex> lock(g_engine_mutex);
+    if (g_engine_running || g_engine_pending_start) return JNI_FALSE;
+    g_engine_pending_start = true;
+    g_engine_stop_requested = false;
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeCancelEngineStart(
+        JNIEnv*, jclass) {
+    std::lock_guard<std::mutex> lock(g_engine_mutex);
+    if (!g_engine_running) {
+        g_engine_pending_start = false;
+        g_engine_stop_requested = false;
+    }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeRunEngine(
+        JNIEnv* env, jclass, jstring cli_args, jint tun_mtu, jboolean packet_information) {
+    if (env == nullptr || cli_args == nullptr || tun_mtu < 576 || tun_mtu > 65535) {
+        return -10;
+    }
+    const char* chars = env->GetStringUTFChars(cli_args, nullptr);
+    if (chars == nullptr) return -11;
+
+    {
+        std::lock_guard<std::mutex> lock(g_engine_mutex);
+        if (g_engine_running) {
+            env->ReleaseStringUTFChars(cli_args, chars);
+            return -12;
+        }
+        if (!g_engine_pending_start) {
+            env->ReleaseStringUTFChars(cli_args, chars);
+            return -14;
+        }
+        if (g_engine_stop_requested) {
+            g_engine_pending_start = false;
+            g_engine_stop_requested = false;
+            env->ReleaseStringUTFChars(cli_args, chars);
+            return -13;
+        }
+        g_engine_pending_start = false;
+        g_engine_running = true;
+    }
+
+    tun2proxy_set_traffic_status_callback(1, &on_native_traffic_status, nullptr);
+    const int result = tun2proxy_run_with_cli_args(
+        chars,
+        static_cast<unsigned short>(tun_mtu),
+        packet_information == JNI_TRUE
+    );
+    env->ReleaseStringUTFChars(cli_args, chars);
+    // Mark the native run idle before clearing a stop request that raced
+    // with Rust dropping its cancellation token. Stop calls serialize on the
+    // same mutex, so no late request can survive into the next run.
+    {
+        std::lock_guard<std::mutex> lock(g_engine_mutex);
+        g_engine_running = false;
+        g_engine_pending_start = false;
+        g_engine_stop_requested = false;
+    }
+    tun2proxy_clear_stop_request();
+    return result;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeStopEngine(
+        JNIEnv*, jclass) {
+    std::lock_guard<std::mutex> lock(g_engine_mutex);
+    if (!g_engine_running) {
+        // Only queue a stop while Kotlin has armed a specific pending run.
+        if (g_engine_pending_start) {
+            g_engine_stop_requested = true;
+            return 0;
+        }
+        return -1;
+    }
+    // Serialize the Rust cancellation request with the transition to IDLE.
+    return tun2proxy_stop();
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/cpp/native_socket_protector.h
+المجلد: app/src/main/cpp
+وظيفة الملف: كود C/C++ الأصلي وجسر JNI مع Android.
+الحجم الأصلي: 244 بايت
+==============================================================================
+#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Returns true only when Android VpnService.protect(fd) succeeds.
+// Must be called before TCP connect or UDP bind/connect.
+bool abz_protect_socket_fd(int fd);
+
+#ifdef __cplusplus
+}
+#endif
+
