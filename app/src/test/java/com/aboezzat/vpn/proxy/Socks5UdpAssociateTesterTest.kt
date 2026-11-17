@@ -31,7 +31,7 @@ class Socks5UdpAssociateTesterTest {
                             listOf(5, 3, 0, 1, 0, 0, 0, 0, 0, 0),
                             readExactly(input, 10).map { it.toInt() and 0xff }
                         )
-                        val address = byteArrayOf(127, 0, 0, 1)
+                        val address = byteArrayOf(0, 0, 0, 0)
                         val port = relay.localPort
                         output.write(byteArrayOf(5, 0, 0, 1) + address +
                             byteArrayOf((port ushr 8).toByte(), port.toByte()))
@@ -60,6 +60,39 @@ class Socks5UdpAssociateTesterTest {
                 assertTrue(result.message.contains("round-trip verified"))
             }
         }
+    }
+
+    @Test
+    fun unspecifiedRelayAddressUsesTheConnectedProxyAddress() {
+        val proxy = InetAddress.getByName("10.100.93.82")
+        assertEquals(
+            proxy,
+            Socks5UdpAssociateTester.normalizeRelayAddress(
+                proxy,
+                InetAddress.getByName("0.0.0.0")
+            )
+        )
+        assertEquals(
+            proxy,
+            Socks5UdpAssociateTester.normalizeRelayAddress(
+                proxy,
+                InetAddress.getByName("::")
+            )
+        )
+    }
+
+    @Test
+    fun loopbackRelayIsOnlyRewrittenForRemoteProxy() {
+        val remoteProxy = InetAddress.getByName("10.100.93.82")
+        val loopback = InetAddress.getByName("127.0.0.1")
+        assertEquals(
+            remoteProxy,
+            Socks5UdpAssociateTester.normalizeRelayAddress(remoteProxy, loopback)
+        )
+        assertEquals(
+            loopback,
+            Socks5UdpAssociateTester.normalizeRelayAddress(loopback, loopback)
+        )
     }
 
     @Test
