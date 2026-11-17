@@ -50,6 +50,7 @@ class AboEzzatVpnService : VpnService() {
 
     private lateinit var tunnelRunner: NativeTunnelRunner
     @Volatile private var directBypassCount = 0
+    @Volatile private var trafficObservedLogged = false
 
     override fun onCreate() {
         super.onCreate()
@@ -182,6 +183,7 @@ class AboEzzatVpnService : VpnService() {
     }
 
     private fun startTunnel(intent: Intent, startId: Int) {
+        trafficObservedLogged = false
         val receiver = intent.getParcelableExtra<ResultReceiver>(EXTRA_RESULT_RECEIVER)
         if (tunnelRunner.isActive()) {
             receiver?.send(RESULT_ALREADY_ACTIVE, Bundle().apply {
@@ -499,6 +501,10 @@ class AboEzzatVpnService : VpnService() {
     /** Receive native tunnel byte counters from the Rust engine. */
     @androidx.annotation.Keep
     fun onNativeTrafficStatus(txBytes: Long, rxBytes: Long) {
+        if (!trafficObservedLogged && (txBytes > 0L || rxBytes > 0L)) {
+            trafficObservedLogged = true
+            ConnectionDiagnostics.add(this, "Native tunnel forwarded traffic observed: TX=$txBytes RX=$rxBytes bytes")
+        }
         activeReceiver?.send(
             RESULT_TRAFFIC_UPDATE,
             Bundle().apply {
