@@ -85,7 +85,17 @@ object Socks5UdpAssociateTester {
                     }
                     datagram.soTimeout = READ_TIMEOUT_MS
 
-                    val relay = InetSocketAddress(InetAddress.getByName(relayHost), relayPort)
+                    val advertisedRelayAddress = InetAddress.getByName(relayHost)
+                    val effectiveRelayAddress = normalizeRelayAddress(
+                        control.inetAddress,
+                        advertisedRelayAddress
+                    )
+                    if (effectiveRelayAddress != advertisedRelayAddress) {
+                        // Match the native engine: unspecified addresses are
+                        // placeholders, and remote clients cannot reach a
+                        // loopback address advertised by a remote proxy.
+                    }
+                    val relay = InetSocketAddress(effectiveRelayAddress, relayPort)
                     val dnsQuery = buildDnsQuery()
                     val request = buildSocksUdpRequest(dnsQuery)
                     datagram.send(DatagramPacket(request, request.size, relay))
@@ -105,7 +115,7 @@ object Socks5UdpAssociateTester {
                 ProxyUdpTestResult(
                     true,
                     "SOCKS5 UDP datagram round-trip verified with a DNS response.",
-                    relayHost,
+                    effectiveRelayAddress.hostAddress ?: relayHost,
                     relayPort
                 )
             }
@@ -116,6 +126,20 @@ object Socks5UdpAssociateTester {
                 false,
                 error.message?.take(140) ?: "SOCKS5 UDP datagram test failed."
             )
+        }
+    }
+
+    internal fun normalizeRelayAddress(
+        proxyAddress: InetAddress,
+        advertisedAddress: InetAddress
+    ): InetAddress {
+        return if (
+            advertisedAddress.isAnyLocalAddress ||
+            (advertisedAddress.isLoopbackAddress && !proxyAddress.isLoopbackAddress)
+        ) {
+            proxyAddress
+        } else {
+            advertisedAddress
         }
     }
 
