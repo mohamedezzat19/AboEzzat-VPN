@@ -44,17 +44,32 @@ class Socks5UdpAssociateTesterTest {
                         // SOCKS UDP header is 10 bytes for an IPv4 destination.
                         assertTrue(packet.size > 22)
                         val dnsQuery = packet.copyOfRange(10, packet.size)
-                        dnsQuery[2] = (dnsQuery[2].toInt() or 0x80).toByte()
-                        val response = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + dnsQuery
+                        val dnsHeader = byteArrayOf(
+                            0xA1.toByte(), 0xB2.toByte(), 0x81.toByte(), 0x80.toByte(),
+                            0, 1, 0, 1, 0, 0, 0, 0
+                        )
+                        val question = dnsQuery.copyOfRange(12, dnsQuery.size)
+                        val answer = byteArrayOf(
+                            0xC0.toByte(), 0x0C, 0, 1, 0, 1,
+                            0, 0, 0, 60, 0, 4, 93, 184.toByte(), 216.toByte(), 34
+                        )
+                        val dnsResponse = dnsHeader + question + answer
+                        val response = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + dnsResponse
                         relay.send(DatagramPacket(response, response.size, request.address, request.port))
                     }
                 }
 
+                var controlWasBoundBeforeProtection = false
                 val result = Socks5UdpAssociateTester.test(
-                    ProxyProfile("UDP test", "127.0.0.1", server.localPort, ProxyProtocol.SOCKS5)
+                    ProxyProfile("UDP test", "127.0.0.1", server.localPort, ProxyProtocol.SOCKS5),
+                    protectSocket = { socket ->
+                        controlWasBoundBeforeProtection = socket.isBound && !socket.isConnected
+                        true
+                    }
                 )
                 worker.join(4000)
                 assertTrue(result.message, result.supported)
+                assertTrue("SOCKS5 control socket must be bound before protect()", controlWasBoundBeforeProtection)
                 assertEquals("127.0.0.1", result.relayAddress)
                 assertEquals(relay.localPort, result.relayPort)
                 assertTrue(result.message.contains("round-trip verified"))
