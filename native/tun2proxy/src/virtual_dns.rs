@@ -40,12 +40,12 @@ impl VirtualDns {
         let ipv4_pool = if ip_pool.first_address().is_ipv4() {
             ip_pool.clone()
         } else {
-            IpCidr::from_str("198.18.0.0/15").expect("valid IPv4 virtual DNS pool")
+            "198.18.0.0/15".parse::<IpCidr>().expect("valid IPv4 virtual DNS pool")
         };
         let ipv6_pool = if ip_pool.first_address().is_ipv6() {
             ip_pool
         } else {
-            IpCidr::from_str("fd77:ab0e:1::/112").expect("valid IPv6 virtual DNS pool")
+            "fd77:ab0e:1::/112".parse::<IpCidr>().expect("valid IPv6 virtual DNS pool")
         };
         Self {
             trailing_dot: false,
@@ -130,20 +130,18 @@ impl VirtualDns {
 
         // Iterate through all entries of the LRU cache and remove those that have expired.
         loop {
-            let (ip, entry) = match self.lru_cache.iter().next() {
-                None => break,
-                Some((ip, entry)) => (ip, entry),
-            };
+            // Copy the key and name out of the cache before mutating it.
+            let expired = self.lru_cache.iter().next().and_then(|(ip, entry)| {
+                (now > entry.expiry).then(|| (*ip, entry.name.clone()))
+            });
 
-            // The entry has expired.
-            if now > entry.expiry {
-                let name = entry.name.clone();
-                self.lru_cache.remove(&ip.clone());
-                self.name_to_ip.remove(&(name, ip.is_ipv6()));
-                continue; // There might be another expired entry after this one.
+            match expired {
+                Some((ip, name)) => {
+                    self.lru_cache.remove(&ip);
+                    self.name_to_ip.remove(&(name, ip.is_ipv6()));
+                }
+                None => break, // The oldest entry is still valid; newer entries are too.
             }
-
-            break; // The entry has not expired and all following entries are newer.
         }
 
         // Return the IP if it is stored inside our LRU cache.
