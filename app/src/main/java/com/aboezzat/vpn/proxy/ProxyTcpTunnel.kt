@@ -43,6 +43,9 @@ object ProxyTcpTunnel {
 
         val socket = Socket()
         try {
+            // Allocate the OS socket before VpnService.protect(); an unbound
+            // Socket may not yet have a native descriptor on Android.
+            socket.bind(InetSocketAddress(0))
             if (protectSocket != null && !protectSocket(socket)) {
                 throw IOException("Could not protect the upstream socket from VPN routing.")
             }
