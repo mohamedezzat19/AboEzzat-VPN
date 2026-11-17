@@ -46,6 +46,9 @@ internal object Tun2ProxyCommandBuilder {
         // speed tests, etc.). HTTP CONNECT has no UDP transport and stays TCP-only.
         if (profile.protocol == ProxyProtocol.SOCKS5) {
             arguments += "--udp-enabled"
+            // Keep UDP/QUIC flows alive across short idle gaps common in
+            // messaging apps and browser sessions. The native default is 10s.
+            arguments += listOf("--udp-timeout", "30")
         }
 
         return arguments.joinToString(" ") { shellQuote(it) }
