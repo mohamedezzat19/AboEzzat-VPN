@@ -1050,6 +1050,26 @@ private fun Dashboard(store: ProxyProfileStore) {
                     ) {
                         Text(tx(if (testing[profile.name] == true) "Testing HTTPS…" else "Test HTTPS connection"))
                     }
+                    val proxyBrowserAllowed = !tunnelActive && !tunnelConnecting &&
+                        profile.username.isNullOrBlank() && profile.password.isNullOrBlank()
+                    OutlinedButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = proxyBrowserAllowed,
+                        onClick = {
+                            context.startActivity(Intent(context, ProxyBrowserActivity::class.java).apply {
+                                putExtra(ProxyBrowserActivity.EXTRA_HOST, profile.host)
+                                putExtra(ProxyBrowserActivity.EXTRA_PORT, profile.port)
+                                putExtra(ProxyBrowserActivity.EXTRA_PROTOCOL, profile.protocol.name)
+                            })
+                        }
+                    ) { Text(tx("Open proxy-only browser")) }
+                    if (!proxyBrowserAllowed) {
+                        val reason = when {
+                            tunnelActive || tunnelConnecting -> "Disconnect the tunnel before using the proxy-only browser."
+                            else -> "The proxy-only browser currently supports profiles without authentication."
+                        }
+                        Text(tx(reason), color = Muted, fontSize = 10.sp)
+                    }
                     OutlinedButton(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
@@ -1221,6 +1241,9 @@ private val arabicUi = mapOf(
     "Testing proxy connection…" to "جارٍ اختبار اتصال البروكسي…",
     "Not tested" to "لم يتم الاختبار",
     "Testing" to "جارٍ الاختبار",
+    "Open proxy-only browser" to "فتح متصفح البروكسي فقط",
+    "Disconnect the tunnel before using the proxy-only browser." to "افصل النفق قبل استخدام متصفح البروكسي فقط.",
+    "The proxy-only browser currently supports profiles without authentication." to "متصفح البروكسي فقط يدعم حاليًا الملفات بدون مصادقة.",
     "Tap the single Proxy button to connect or disconnect the device tunnel." to "اضغط زر البروكسي الواحد لتوصيل نفق الجهاز أو قطع اتصاله.",
     "Add and select a proxy profile first." to "أضف ملف بروكسي وحدده أولًا.",
     "Grant Android VPN permission, then tap Connect again." to "امنح إذن VPN من Android ثم اضغط اتصال مرة أخرى.",
