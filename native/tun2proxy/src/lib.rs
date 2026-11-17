@@ -478,6 +478,22 @@ where
                 }
                 let session_count = SessionCountGuard::new(task_count.clone());
                 let info = SessionInfo::new(tcp.local_addr(), tcp.peer_addr(), IpProtocol::Tcp);
+                // In virtual-DNS mode, TCP fallback queries must be answered
+                // locally just like UDP queries. Sending them to the upstream
+                // proxy would target the synthetic TUN DNS address and fail.
+                if info.dst.port() == DNS_PORT && args.dns == ArgDns::Virtual {
+                    if let Some(virtual_dns) = virtual_dns.clone() {
+                        session_tasks.spawn(async move {
+                            let _session_count = session_count;
+                            if let Err(err) = handle_virtual_dns_tcp_session(tcp, virtual_dns).await {
+                                log::error!("{info} virtual DNS-over-TCP error \"{err}\"");
+                            }
+                        });
+                    } else {
+                        log::error!("{info} virtual DNS mode has no DNS mapping table");
+                    }
+                    continue;
+                }
                 let domain_name = if let Some(virtual_dns) = &virtual_dns {
                     let mut virtual_dns = virtual_dns.lock().await;
                     virtual_dns.touch_ip(&tcp.peer_addr().ip());
@@ -629,6 +645,52 @@ mod socket_queue_tests {
         assert!(queue.tcp_v6.is_none());
         assert!(queue.udp_v6.is_none());
     }
+}
+
+fn decode_dns_tcp_queries(buffer: &mut Vec<u8>, received: &[u8]) -> crate::Result<Vec<Vec<u8>>> {
+    buffer.extend_from_slice(received);
+
+    let mut consumed = 0;
+    let mut queries = Vec::new();
+    while buffer.len().saturating_sub(consumed) >= 2 {
+        let message_len = u16::from_be_bytes([buffer[consumed], buffer[consumed + 1]]) as usize;
+        if message_len == 0 {
+            return Err("DNS-over-TCP query has an empty frame".into());
+        }
+        let frame_end = consumed + 2 + message_len;
+        if buffer.len() < frame_end {
+            break;
+        }
+        queries.push(buffer[consumed + 2..frame_end].to_vec());
+        consumed = frame_end;
+    }
+
+    if consumed > 0 {
+        buffer.drain(..consumed);
+    }
+    Ok(queries)
+}
+
+async fn handle_virtual_dns_tcp_session(
+    mut tcp: IpStackTcpStream,
+    dns: Arc<Mutex<VirtualDns>>,
+) -> crate::Result<()> {
+    let mut buf = [0_u8; 8192];
+    let mut pending = Vec::new();
+    loop {
+        let len = tcp.read(&mut buf).await?;
+        if len == 0 {
+            break;
+        }
+        for query in decode_dns_tcp_queries(&mut pending, &buf[..len])? {
+            let (response, qname, ip) = dns.lock().await.generate_query(&query)?;
+            let response_len = u16::try_from(response.len())?;
+            tcp.write_all(&response_len.to_be_bytes()).await?;
+            tcp.write_all(&response).await?;
+            log::debug!("Virtual DNS-over-TCP query: {qname} -> {ip}");
+        }
+    }
+    Ok(())
 }
 
 async fn handle_virtual_dns_session(mut udp: IpStackUdpStream, dns: Arc<Mutex<VirtualDns>>) -> crate::Result<()> {
@@ -1193,6 +1255,41 @@ mod dns_tcp_response_tests {
         frame.extend_from_slice(&(message.len() as u16).to_be_bytes());
         frame.extend_from_slice(&message);
         frame
+    }
+
+    fn query_frame(name: &str, record_type: RecordType) -> Vec<u8> {
+        let name = Name::from_str(name).unwrap();
+        let mut message = Message::new(0, MessageType::Query, OpCode::Query);
+        message.add_query(Query::query(name, record_type));
+        let message = message.to_vec().unwrap();
+        let mut frame = Vec::with_capacity(message.len() + 2);
+        frame.extend_from_slice(&(message.len() as u16).to_be_bytes());
+        frame.extend_from_slice(&message);
+        frame
+    }
+
+    #[test]
+    fn virtual_dns_tcp_query_decoder_handles_split_and_coalesced_frames() {
+        let first = query_frame("a.example.", RecordType::A);
+        let second = query_frame("b.example.", RecordType::AAAA);
+        let mut pending = Vec::new();
+
+        assert!(decode_dns_tcp_queries(&mut pending, &first[..1]).unwrap().is_empty());
+        assert_eq!(pending, first[..1]);
+        let mut rest = first[1..].to_vec();
+        rest.extend_from_slice(&second);
+        let queries = decode_dns_tcp_queries(&mut pending, &rest).unwrap();
+        assert_eq!(queries, vec![
+            first[2..].to_vec(),
+            second[2..].to_vec(),
+        ]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn virtual_dns_tcp_query_decoder_rejects_empty_frames() {
+        let mut pending = Vec::new();
+        assert!(decode_dns_tcp_queries(&mut pending, &[0, 0]).is_err());
     }
 
     #[test]
