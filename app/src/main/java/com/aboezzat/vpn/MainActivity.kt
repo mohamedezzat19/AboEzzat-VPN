@@ -1102,7 +1102,6 @@ private fun Dashboard(store: ProxyProfileStore) {
                     if (result != null) {
                         Text(tx(if (result.success) "TCP test passed" else "TCP test failed"), color = if (result.success) Accent else Color(0xFFFF8B8B), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         Text(result.message, color = Muted, fontSize = 11.sp)
-                        if (result.latencyMs > 0) Text("${result.latencyMs} ms", color = Muted, fontSize = 11.sp)
                     }
                 }
             },
