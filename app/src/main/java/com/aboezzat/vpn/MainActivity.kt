@@ -107,6 +107,7 @@ import com.aboezzat.vpn.proxy.ProxyProfile
 import com.aboezzat.vpn.proxy.ProxyProtocol
 import com.aboezzat.vpn.vpn.AboEzzatVpnService
 import com.aboezzat.vpn.proxy.ProxyTestResult
+import com.aboezzat.vpn.ConnectionDiagnostics
 import com.aboezzat.vpn.update.AppUpdateInfo
 import com.aboezzat.vpn.update.GitHubReleaseUpdater
 import kotlinx.coroutines.Dispatchers
@@ -177,6 +178,8 @@ private fun Dashboard(store: ProxyProfileStore) {
     }
     var routeSearch by remember { mutableStateOf("") }
     var showAppsPage by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
+    var diagnosticsText by remember { mutableStateOf("") }
     var selectedRouteApp by remember { mutableStateOf<LaunchableApp?>(null) }
     var activeName by remember { mutableStateOf(store.activeProfileName()) }
     var editorProfile by remember { mutableStateOf<ProxyProfile?>(null) }
@@ -437,9 +440,9 @@ private fun Dashboard(store: ProxyProfileStore) {
                     NavigationDrawerItem(label = { Text(tx("App updates")) }, selected = false, onClick = {
                         updateScope.launch { drawerState.close(); pageScrollState.animateScrollTo(updateSectionOffset.coerceAtLeast(0)) }
                     })
-                    Divider(color = Color(0xFF26344D))
-                    Text(tx("Connection diagnostics"), color = Muted, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                    Text(tx("TCP proxy handshake status is shown in each profile. UDP and per-app routing support depend on the upstream server and are not assumed."), color = Muted, fontSize = 11.sp, lineHeight = 16.sp, modifier = Modifier.padding(horizontal = 16.dp))
+                    NavigationDrawerItem(label = { Text(tx("Connection diagnostics")) }, selected = false, onClick = {
+                        updateScope.launch { drawerState.close(); showDiagnostics = true; diagnosticsText = ConnectionDiagnostics.read(context) }
+                    })
                 }
             }
         }
@@ -936,6 +939,46 @@ private fun Dashboard(store: ProxyProfileStore) {
         }
     }
 
+    if (showDiagnostics) {
+        Dialog(onDismissRequest = { showDiagnostics = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
+                Column(modifier = Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { showDiagnostics = false }) { Text("‹", color = Accent, fontSize = 30.sp) }
+                        Column(Modifier.weight(1f)) {
+                            Text(tx("CONNECTION DIAGNOSTICS"), color = Accent, fontSize = 10.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.Bold)
+                            Text(tx("Diagnostic report"), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                        }
+                    }
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(tx("Live tunnel state"), color = Color.White, fontWeight = FontWeight.Bold)
+                            Text(tx(if (tunnelActive) "Proxy tunnel active" else if (tunnelConnecting) "Starting proxy tunnel…" else "Proxy tunnel stopped"), color = if (tunnelActive) Accent else Muted, fontSize = 12.sp)
+                            Text(tx("Sent") + ": " + android.text.format.Formatter.formatShortFileSize(context, tunnelTxBytes) + "    " + tx("Received") + ": " + android.text.format.Formatter.formatShortFileSize(context, tunnelRxBytes), color = Color.White, fontSize = 12.sp)
+                            Text(tx(tunnelStatus), color = Muted, fontSize = 11.sp)
+                        }
+                    }
+                    Text(tx("Recent events"), color = Color.White, fontWeight = FontWeight.Bold)
+                    Surface(modifier = Modifier.weight(1f).fillMaxWidth(), color = Panel, shape = RoundedCornerShape(14.dp)) {
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp)) {
+                            Text(diagnosticsText.ifBlank { tx("No diagnostic events have been recorded yet. Connect the proxy and reproduce the problem, then tap Refresh.") }, color = if (diagnosticsText.isBlank()) Muted else Color(0xFFD6E2F2), fontSize = 11.sp, lineHeight = 17.sp)
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(modifier = Modifier.weight(1f), onClick = { diagnosticsText = ConnectionDiagnostics.read(context) }) { Text(tx("Refresh")) }
+                        OutlinedButton(modifier = Modifier.weight(1f), onClick = {
+                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("AboEzzat VPN diagnostics", diagnosticsText))
+                            notice = tx("Diagnostic report copied")
+                        }) { Text(tx("Copy report")) }
+                        OutlinedButton(modifier = Modifier.weight(1f), onClick = { ConnectionDiagnostics.clear(context); diagnosticsText = "" }) { Text(tx("Clear")) }
+                    }
+                    Text(tx("The report excludes proxy passwords and credentials. Reproduce the connection error, refresh, then copy the report and send it here."), color = Muted, fontSize = 10.sp, lineHeight = 14.sp)
+                }
+            }
+        }
+    }
+
     selectedRouteApp?.let { app ->
         AlertDialog(
             onDismissRequest = { selectedRouteApp = null },
@@ -1036,6 +1079,18 @@ private val arabicUi = mapOf(
     "Installed apps" to "التطبيقات المثبتة",
     "App updates" to "تحديثات التطبيق",
     "Connection diagnostics" to "تشخيص الاتصال",
+    "CONNECTION DIAGNOSTICS" to "تشخيص الاتصال",
+    "Diagnostic report" to "تقرير التشخيص",
+    "Live tunnel state" to "حالة النفق الحالية",
+    "Recent events" to "الأحداث الأخيرة",
+    "No diagnostic events have been recorded yet. Connect the proxy and reproduce the problem, then tap Refresh." to "لم يتم تسجيل أحداث تشخيص بعد. شغّل البروكسي وكرر المشكلة ثم اضغط تحديث.",
+    "Refresh" to "تحديث",
+    "Copy report" to "نسخ التقرير",
+    "Clear" to "مسح",
+    "Diagnostic report copied" to "تم نسخ تقرير التشخيص",
+    "The report excludes proxy passwords and credentials. Reproduce the connection error, refresh, then copy the report and send it here." to "التقرير لا يحتوي على كلمات مرور أو بيانات اعتماد البروكسي. كرر خطأ الاتصال ثم حدّث التقرير وانسخه وأرسله هنا.",
+    "Proxy tunnel active" to "نفق البروكسي نشط",
+    "Proxy tunnel stopped" to "نفق البروكسي متوقف",
     "Sent" to "مرسل",
     "Received" to "مستقبل",
     "TCP proxy handshake status is shown in each profile. UDP and per-app routing support depend on the upstream server and are not assumed." to "تظهر نتيجة مصافحة TCP في كل ملف بروكسي. دعم UDP وتوجيه التطبيقات يعتمدان على الخادم ولا نفترض توفرهما.",
