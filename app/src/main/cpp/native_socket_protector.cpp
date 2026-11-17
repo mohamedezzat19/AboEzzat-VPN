@@ -22,6 +22,7 @@ std::condition_variable g_idle;
 jobject g_service = nullptr;
 jmethodID g_protect_method = nullptr;
 jmethodID g_traffic_method = nullptr;
+jmethodID g_diagnostic_method = nullptr;
 unsigned int g_in_flight = 0;
 bool g_shutting_down = false;
 std::mutex g_engine_mutex;
@@ -152,8 +153,9 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeBindService(
     if (service_class == nullptr) return JNI_FALSE;
     jmethodID method = env->GetMethodID(service_class, "protectNativeSocket", "(I)Z");
     jmethodID traffic_method = env->GetMethodID(service_class, "onNativeTrafficStatus", "(JJ)V");
+    jmethodID diagnostic_method = env->GetMethodID(service_class, "onNativeDiagnostic", "(Ljava/lang/String;)V");
     env->DeleteLocalRef(service_class);
-    if (method == nullptr || traffic_method == nullptr || env->ExceptionCheck()) {
+    if (method == nullptr || traffic_method == nullptr || diagnostic_method == nullptr || env->ExceptionCheck()) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         return JNI_FALSE;
     }
@@ -169,6 +171,7 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeBindService(
     g_service = global_service;
     g_protect_method = method;
     g_traffic_method = traffic_method;
+    g_diagnostic_method = diagnostic_method;
     return JNI_TRUE;
 }
 
@@ -184,6 +187,7 @@ Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeUnbindService(
         g_service = nullptr;
         g_protect_method = nullptr;
         g_traffic_method = nullptr;
+        g_diagnostic_method = nullptr;
         g_shutting_down = false;
     }
     if (env != nullptr && old_service != nullptr) {
@@ -195,6 +199,42 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_aboezzat_vpn_vpn_NativeSocketProtectorBridge_nativeProtectSocket(
         JNIEnv*, jclass, jint fd) {
     return protect_fd_from_native(static_cast<int>(fd)) ? JNI_TRUE : JNI_FALSE;
+}
+
+// Forward privacy-safe native diagnostics into the app's persistent history.
+extern "C" void abz_report_diagnostic(const char* message) {
+    if (message == nullptr || g_vm == nullptr) return;
+    jobject service = nullptr;
+    jmethodID method = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_shutting_down || g_service == nullptr || g_diagnostic_method == nullptr) return;
+        ++g_in_flight;
+        service = g_service;
+        method = g_diagnostic_method;
+    }
+    JNIEnv* env = nullptr;
+    bool attached_here = false;
+    const jint get_env = g_vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (get_env == JNI_EDETACHED) {
+        if (g_vm->AttachCurrentThread(&env, nullptr) == JNI_OK) attached_here = true;
+    } else if (get_env != JNI_OK) {
+        env = nullptr;
+    }
+    if (env != nullptr) {
+        jstring value = env->NewStringUTF(message);
+        if (value != nullptr) {
+            env->CallVoidMethod(service, method, value);
+            env->DeleteLocalRef(value);
+        }
+        if (env->ExceptionCheck()) env->ExceptionClear();
+    }
+    if (attached_here) g_vm->DetachCurrentThread();
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_in_flight > 0) --g_in_flight;
+        if (g_in_flight == 0) g_idle.notify_all();
+    }
 }
 
 // Stable C ABI for the patched tun2proxy socket factory.
