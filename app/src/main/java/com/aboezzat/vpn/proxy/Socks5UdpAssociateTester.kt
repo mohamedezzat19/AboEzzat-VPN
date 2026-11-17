@@ -76,11 +76,13 @@ object Socks5UdpAssociateTester {
                 if (relayPort == 0) throw IOException("SOCKS5 server returned an invalid UDP relay port.")
 
                 DatagramSocket(null).use { datagram ->
+                    // Bind first so Android has a real socket fd to protect;
+                    // protect still runs before any packet is sent.
+                    datagram.reuseAddress = true
+                    datagram.bind(InetSocketAddress(0))
                     if (protectDatagramSocket != null && !protectDatagramSocket(datagram)) {
                         throw IOException("Could not protect the UDP datagram socket from VPN routing.")
                     }
-                    datagram.reuseAddress = true
-                    datagram.bind(InetSocketAddress(0))
                     datagram.soTimeout = READ_TIMEOUT_MS
 
                     val relay = InetSocketAddress(InetAddress.getByName(relayHost), relayPort)
