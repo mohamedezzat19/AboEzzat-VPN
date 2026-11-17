@@ -669,7 +669,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                             enabled = testing[profile.name] != true,
                             colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Midnight)
                         ) {
-                            Text(tx(if (testing[profile.name] == true) "Testing protected socket…" else "Test TCP connection"))
+                            Text(tx(if (testing[profile.name] == true) "Testing protected socket…" else "Test HTTPS connection"))
                         }
                         OutlinedButton(
                             onClick = {
@@ -723,14 +723,14 @@ private fun Dashboard(store: ProxyProfileStore) {
                                 lineHeight = 16.sp
                             )
                         }
-                        Text(tx("TCP check: verifies the upstream proxy connection only. UDP is tested separately; neither check starts or stops the tunnel."),
+                        Text(tx("HTTPS check: verifies the upstream proxy handshake, destination TLS and a real HTTPS response. UDP is tested separately; neither check starts or stops the tunnel."),
                             color = Muted,
                             fontSize = 10.sp,
                             lineHeight = 14.sp
                         )
                         testResults[profile.name]?.let { result ->
                             Text(
-                                (if (result.success) "HANDSHAKE OK" else "FAILED") +
+                                (if (result.success) "HTTPS OK" else "FAILED") +
                                     " · " + result.message +
                                     if (result.success) " · ${result.latencyMs} ms" else "",
                                 color = if (result.success) Accent else Color(0xFFFF8B8B),
