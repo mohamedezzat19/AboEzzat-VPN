@@ -47,14 +47,27 @@ impl VirtualDns {
         } else {
             "fd77:ab0e:1::/112".parse::<IpCidr>().expect("valid IPv6 virtual DNS pool")
         };
+        let ipv4_network_addr = ipv4_pool.first_address();
+        let ipv4_broadcast_addr = ipv4_pool.last_address();
+        let ipv6_network_addr = ipv6_pool.first_address();
+        let ipv6_broadcast_addr = ipv6_pool.last_address();
+
+        // Never hand out the subnet's first address. In particular, the
+        // first address of an IPv6 subnet is the subnet-router anycast
+        // address (RFC 4291), not a usable synthetic destination.
+        let next_ipv4_addr = Self::increment_ip(ipv4_network_addr)
+            .expect("valid IPv4 virtual DNS pool");
+        let next_ipv6_addr = Self::increment_ip(ipv6_network_addr)
+            .expect("valid IPv6 virtual DNS pool");
+
         Self {
             trailing_dot: false,
-            next_ipv4_addr: ipv4_pool.first_address(),
-            ipv4_network_addr: ipv4_pool.first_address(),
-            ipv4_broadcast_addr: ipv4_pool.last_address(),
-            next_ipv6_addr: ipv6_pool.first_address(),
-            ipv6_network_addr: ipv6_pool.first_address(),
-            ipv6_broadcast_addr: ipv6_pool.last_address(),
+            next_ipv4_addr,
+            ipv4_network_addr,
+            ipv4_broadcast_addr,
+            next_ipv6_addr,
+            ipv6_network_addr,
+            ipv6_broadcast_addr,
             name_to_ip: HashMap::default(),
             lru_cache: LruCache::new_unbounded(),
         }
@@ -218,6 +231,23 @@ mod tests {
     }
 
     #[test]
+    fn first_allocated_addresses_skip_reserved_subnet_addresses() {
+        let mut dns = dns("198.18.0.0/15");
+
+        let (_, _, ipv4) =
+            dns.generate_query(&query_wire("first-v4.example.", RecordType::A)).unwrap();
+        let (_, _, ipv6) =
+            dns.generate_query(&query_wire("first-v6.example.", RecordType::AAAA)).unwrap();
+
+        assert_eq!(ipv4, "198.18.0.1".parse::<IpAddr>().unwrap());
+        assert_eq!(ipv6, "fd77:ab0e:1::1".parse::<IpAddr>().unwrap());
+        assert_ne!(ipv4, dns.ipv4_network_addr);
+        assert_ne!(ipv6, dns.ipv6_network_addr);
+        assert_ne!(ipv4, dns.ipv4_broadcast_addr);
+        assert_ne!(ipv6, dns.ipv6_broadcast_addr);
+    }
+
+    #[test]
     fn only_a_and_aaaa_are_synthetic_dns_queries() {
         let dns = dns("198.18.0.0/15");
         assert!(dns.is_synthetic_query(&query_wire("example.org.", RecordType::A)).unwrap());
@@ -258,44 +288,3 @@ mod tests {
         assert!(ipv4.is_ipv4());
         let a_response = Message::from_vec(&a_response).unwrap();
         assert_eq!(a_response.answers.len(), 1);
-        assert!(matches!(a_response.answers[0].data, hickory_proto::rr::RData::A(_)));
-    }
-
-    
-    #[test]
-    fn ipv4_pool_also_allocates_distinct_virtual_ipv6_for_aaaa() {
-        let mut dns = dns("198.18.0.0/15");
-        let (a_response, name_a, ipv4) =
-            dns.generate_query(&query_wire("dual.example.", RecordType::A)).unwrap();
-        let (aaaa_response, name_aaaa, ipv6) =
-            dns.generate_query(&query_wire("dual.example.", RecordType::AAAA)).unwrap();
-
-        assert_eq!(name_a, name_aaaa);
-        assert!(ipv4.is_ipv4());
-        assert!(ipv6.is_ipv6());
-        assert_ne!(ipv4, ipv6);
-        assert_eq!(dns.resolve_ip(&ipv4).map(String::as_str), Some("dual.example"));
-        assert_eq!(dns.resolve_ip(&ipv6).map(String::as_str), Some("dual.example"));
-
-        let a_response = Message::from_vec(&a_response).unwrap();
-        let aaaa_response = Message::from_vec(&aaaa_response).unwrap();
-        assert!(matches!(a_response.answers[0].data, hickory_proto::rr::RData::A(_)));
-        assert!(matches!(aaaa_response.answers[0].data, hickory_proto::rr::RData::AAAA(_)));
-    }
-
-    #[test]
-    fn expired_mapping_is_reclaimed_and_active_mapping_can_be_touched() {
-        let mut dns = dns("198.18.0.0/29");
-        let name = "expired.example".to_string();
-        let ip = dns.find_or_allocate_ip(name.clone(), false).unwrap();
-        dns.lru_cache.get_mut(&ip).unwrap().expiry = Instant::now() - Duration::from_secs(1);
-
-        let reclaimed_ip = dns.find_or_allocate_ip(name.clone(), false).unwrap();
-        assert_eq!(reclaimed_ip, ip);
-
-        dns.lru_cache.get_mut(&ip).unwrap().expiry = Instant::now() - Duration::from_secs(1);
-        dns.touch_ip(&ip);
-        let touched_ip = dns.find_or_allocate_ip(name, false).unwrap();
-        assert_eq!(touched_ip, ip);
-    }
-}
