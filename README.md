@@ -1,6 +1,6 @@
-# AboEzzat VPN
+# AboEzzat Proxy
 
-Android client for sending traffic from a second phone through an upstream proxy running on another device.
+Android client for routing device traffic through an upstream proxy using Android VPN Service, TUN, and the native tun2proxy engine.
 
 **Important architecture boundary:** this repository is the Android proxy client. It does not implement the proxy server on the first phone. The first phone must run a compatible HTTP CONNECT or SOCKS5 server.
 
