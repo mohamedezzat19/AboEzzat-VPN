@@ -41,6 +41,9 @@ object Socks5UdpAssociateTester {
 
         return try {
             Socket().use { control ->
+                // Allocate the native fd before protect(), and keep protection
+                // before connect() so the control channel cannot loop into TUN.
+                control.bind(InetSocketAddress(0))
                 if (protectSocket != null && !protectSocket(control)) {
                     throw IOException("Could not protect the SOCKS5 control socket from VPN routing.")
                 }
@@ -103,11 +106,7 @@ object Socks5UdpAssociateTester {
                     datagram.receive(response)
                     val dnsPayload = extractDnsPayload(response.data.copyOf(response.length))
                     if (dnsPayload.size < 12) throw IOException("UDP relay returned an incomplete DNS response.")
-                    val transactionId = ((dnsPayload[0].toInt() and 0xff) shl 8) or
-                        (dnsPayload[1].toInt() and 0xff)
-                    if (transactionId != DNS_TRANSACTION_ID || (dnsPayload[2].toInt() and 0x80) == 0) {
-                        throw IOException("UDP relay response did not match the DNS test request.")
-                    }
+                    validateDnsResponse(buildDnsQuery(), dnsPayload)
 
                     ProxyUdpTestResult(
                         true,
@@ -124,6 +123,20 @@ object Socks5UdpAssociateTester {
                 false,
                 error.message?.take(140) ?: "SOCKS5 UDP datagram test failed."
             )
+        }
+    }
+
+    internal fun validateDnsResponse(query: ByteArray, response: ByteArray) {
+        if (response.size < 12) throw IOException("UDP relay returned an incomplete DNS response.")
+        val queryId = ((query[0].toInt() and 0xff) shl 8) or (query[1].toInt() and 0xff)
+        val responseId = ((response[0].toInt() and 0xff) shl 8) or (response[1].toInt() and 0xff)
+        val flags = ((response[2].toInt() and 0xff) shl 8) or (response[3].toInt() and 0xff)
+        val answerCount = ((response[6].toInt() and 0xff) shl 8) or (response[7].toInt() and 0xff)
+        if (responseId != queryId || (flags and 0x8000) == 0) {
+            throw IOException("UDP relay response did not match the DNS test request.")
+        }
+        if ((flags and 0x000f) != 0 || answerCount == 0) {
+            throw IOException("UDP relay returned a DNS error or no answer.")
         }
     }
 
