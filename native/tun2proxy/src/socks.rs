@@ -413,6 +413,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn socks5_udp_associate_reply_accepts_fragmented_unspecified_relay() {
+        let src = "127.0.0.1:12345".parse().unwrap();
+        let dst = "198.51.100.10:443".parse().unwrap();
+        let mut handler = SocksProxyImpl::new(
+            "127.0.0.1:1080".parse().unwrap(),
+            SessionInfo::new(src, dst, IpProtocol::Udp),
+            None,
+            None,
+            Version::V5,
+            Command::UdpAssociate,
+        )
+        .unwrap();
+
+        // No-authentication selection advances the state machine and queues
+        // the UDP ASSOCIATE request.
+        push_server_data(&mut handler, &[0x05, 0x00]).await;
+        assert_eq!(handler.state, SocksState::ReceiveResponse);
+        assert!(handler.peek_data(OutgoingDirection::ToServer).buffer.len() >= 10);
+
+        // RFC 1928 permits an unspecified relay address. Split the response
+        // to verify that the state machine waits for the complete frame.
+        let response = [0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0x87, 0x8b];
+        push_server_data(&mut handler, &response[..7]).await;
+        assert_eq!(handler.state, SocksState::ReceiveResponse);
+        assert_eq!(handler.get_udp_associate(), None);
+
+        push_server_data(&mut handler, &response[7..]).await;
+        assert!(handler.connection_established());
+        assert_eq!(
+            handler.get_udp_associate(),
+            Some("0.0.0.0:34699".parse().unwrap())
+        );
+    }
+
+    #[tokio::test]
     async fn socks5_authentication_and_connect_reply_accept_fragmented_frames() {
         let mut handler = socks5_handler();
 
