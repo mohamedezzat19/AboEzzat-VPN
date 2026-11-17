@@ -22,7 +22,7 @@ use std::{
     net::{IpAddr, SocketAddr},
     os::fd::AsRawFd,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -72,6 +72,14 @@ const DNS_PORT: u16 = 53;
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const PROXY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const DNS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Returns only the DNS record type for diagnostics; query names are never logged.
+fn dns_query_type_label(query: &[u8]) -> String {
+    dns::parse_data_to_dns_message(query, false)
+        .ok()
+        .and_then(|message| message.queries.first().map(|question| format!("{:?}", question.query_type())))
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(
@@ -790,12 +798,16 @@ async fn handle_virtual_dns_tcp_session(
                 log::debug!("Virtual DNS-over-TCP query: {qname} -> {ip}");
                 response
             } else {
+                let qtype = dns_query_type_label(&query);
+                let connect_started = Instant::now();
                 let mut dns_info = session_info;
                 dns_info.protocol = IpProtocol::Tcp;
                 let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
                 let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
+                let proxy_connect_ms = connect_started.elapsed().as_millis();
+                let dns_started = Instant::now();
                 let response = tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, &query, ipv6_enabled)).await.map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out"))??;
-                log::debug!("Virtual DNS-over-TCP forwarded non-A/AAAA query through proxy: {session_info}");
+                log::info!("Virtual DNS-over-TCP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={}", dns_started.elapsed().as_millis());
                 response
             };
             let response_len = u16::try_from(response.len())?;
@@ -873,12 +885,16 @@ async fn handle_virtual_dns_session(
         } else {
             // Preserve SRV/TXT/HTTPS/SVCB and other records by asking the real
             // resolver through the same proxy. Never fall back to device DNS.
+            let qtype = dns_query_type_label(query);
+            let connect_started = Instant::now();
             let mut dns_info = session_info;
             dns_info.protocol = IpProtocol::Tcp;
             let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
             let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
+            let proxy_connect_ms = connect_started.elapsed().as_millis();
+            let dns_started = Instant::now();
             let response = tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, query, ipv6_enabled)).await.map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out"))??;
-            log::debug!("Virtual DNS forwarded non-A/AAAA query through proxy: {session_info}");
+            log::info!("Virtual DNS-over-UDP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={}", dns_started.elapsed().as_millis());
             response
         };
 
