@@ -824,7 +824,7 @@ async fn handle_virtual_dns_tcp_session(
                     Ok(handler) => handler,
                     Err(error) => {
                         report_native_diagnostic(&format!("DNS TCP failed: qtype={qtype}, stage=proxy_setup, error={error}"));
-                        return Err(error);
+                        return Err(crate::error::Error::Io(error));
                     }
                 };
                 let (mut server, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
@@ -935,7 +935,7 @@ async fn handle_virtual_dns_session(
                 Ok(handler) => handler,
                 Err(error) => {
                     report_native_diagnostic(&format!("DNS UDP failed: qtype={qtype}, stage=proxy_setup, error={error}"));
-                    return Err(error);
+                    return Err(crate::error::Error::Io(error));
                 }
             };
             let (mut server, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
