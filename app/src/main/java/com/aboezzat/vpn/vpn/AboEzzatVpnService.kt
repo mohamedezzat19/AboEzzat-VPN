@@ -273,7 +273,7 @@ class AboEzzatVpnService : VpnService() {
 
         // Only report the tunnel as running after the native worker accepted the session.
         tunnelRunning = true
-        ConnectionDiagnostics.add(this, "Tunnel worker accepted; direct bypass apps=" + directBypassCount)
+        ConnectionDiagnostics.add(this, "Tunnel worker accepted; upstream internet traffic is not yet verified; direct bypass apps=" + directBypassCount)
         receiver?.send(
             RESULT_STARTED,
             Bundle().apply {
@@ -282,7 +282,7 @@ class AboEzzatVpnService : VpnService() {
                 putString(EXTRA_MESSAGE, "Tunnel worker started via ${profile.name}. Direct bypass active for $directBypassCount app(s); other saved route modes are not separately enforced yet.")
             }
         )
-        updateTunnelNotification("Tunnel active via ${profile.name} · $directBypassCount direct bypass")
+        updateTunnelNotification("Tunnel worker running via ${profile.name} · internet not verified · $directBypassCount direct bypass")
     }
 
     private fun stopTunnel(intent: Intent, startId: Int) {
