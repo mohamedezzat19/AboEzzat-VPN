@@ -71,6 +71,7 @@ pub mod win_svc;
 const DNS_PORT: u16 = 53;
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const PROXY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const DNS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Hash, Copy, Clone, Eq, PartialEq, Debug)]
 #[cfg_attr(
@@ -793,7 +794,7 @@ async fn handle_virtual_dns_tcp_session(
                 dns_info.protocol = IpProtocol::Tcp;
                 let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
                 let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
-                let response = forward_dns_query_over_tcp(&mut server, &query, ipv6_enabled).await?;
+                let response = tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, &query, ipv6_enabled)).await.map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out"))??;
                 log::debug!("Virtual DNS-over-TCP forwarded non-A/AAAA query through proxy: {session_info}");
                 response
             };
@@ -876,7 +877,7 @@ async fn handle_virtual_dns_session(
             dns_info.protocol = IpProtocol::Tcp;
             let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
             let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
-            let response = forward_dns_query_over_tcp(&mut server, query, ipv6_enabled).await?;
+            let response = tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, query, ipv6_enabled)).await.map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out"))??;
             log::debug!("Virtual DNS forwarded non-A/AAAA query through proxy: {session_info}");
             response
         };
@@ -1474,23 +1475,6 @@ mod dns_tcp_response_tests {
     fn virtual_dns_tcp_query_decoder_rejects_empty_frames() {
         let mut pending = Vec::new();
         assert!(decode_dns_tcp_queries(&mut pending, &[0, 0]).is_err());
-    }
-
-    #[test]
-    fn virtual_dns_tcp_query_decoder_handles_split_prefix_body_and_coalesced_frames() {
-        let mut pending = Vec::new();
-        assert!(decode_dns_tcp_queries(&mut pending, &[0]).unwrap().is_empty());
-        assert!(decode_dns_tcp_queries(&mut pending, &[3, 1]).unwrap().is_empty());
-        assert_eq!(pending, vec![0, 3, 1]);
-
-        let queries = decode_dns_tcp_queries(&mut pending, &[2, 3, 0, 2, 4, 5]).unwrap();
-        assert_eq!(queries, vec![vec![1, 2, 3], vec![4, 5]]);
-        assert!(pending.is_empty());
-    }
-
-    #[test]
-    fn virtual_dns_tcp_query_decoder_rejects_empty_frames() {
-        assert!(decode_dns_tcp_queries(&mut Vec::new(), &[0, 0]).is_err());
     }
 
     #[test]
