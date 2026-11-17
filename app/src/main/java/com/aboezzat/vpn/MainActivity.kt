@@ -485,7 +485,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         )
                     }
                     Text(
-                        tx(if (tunnelConnecting) "Starting proxy tunnel…" else if (tunnelActive) "Tunnel worker running · internet not verified" else "Proxy tunnel stopped"),
+                        tx(if (tunnelConnecting) "Starting proxy tunnel…" else if (tunnelActive && (tunnelTxBytes > 0L || tunnelRxBytes > 0L)) "Tunnel traffic observed · destination not verified" else if (tunnelActive) "Tunnel worker running · internet not verified" else "Proxy tunnel stopped"),
                         color = if (tunnelConnecting) Muted else if (tunnelActive) Color(0xFF54D98C) else Color(0xFFFF7777),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
@@ -910,7 +910,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(tx("Live tunnel state"), color = Color.White, fontWeight = FontWeight.Bold)
-                            Text(tx(if (tunnelActive) "Tunnel worker running · internet not verified" else if (tunnelConnecting) "Starting proxy tunnel…" else "Proxy tunnel stopped"), color = if (tunnelActive) Accent else Muted, fontSize = 12.sp)
+                            Text(tx(if (tunnelActive && (tunnelTxBytes > 0L || tunnelRxBytes > 0L)) "Tunnel traffic observed · destination not verified" else if (tunnelActive) "Tunnel worker running · internet not verified" else if (tunnelConnecting) "Starting proxy tunnel…" else "Proxy tunnel stopped"), color = if (tunnelActive) Accent else Muted, fontSize = 12.sp)
                             Text(tx("Sent") + ": " + android.text.format.Formatter.formatShortFileSize(context, tunnelTxBytes) + "    " + tx("Received") + ": " + android.text.format.Formatter.formatShortFileSize(context, tunnelRxBytes), color = Color.White, fontSize = 12.sp)
                             Text(tx(tunnelStatus), color = Muted, fontSize = 11.sp)
                         }
@@ -1150,6 +1150,7 @@ private val arabicUi = mapOf(
     "The report excludes proxy passwords and credentials. Reproduce the connection error, refresh, then copy the report and send it here." to "التقرير لا يحتوي على كلمات مرور أو بيانات اعتماد البروكسي. كرر خطأ الاتصال ثم حدّث التقرير وانسخه وأرسله هنا.",
     "Proxy tunnel active" to "نفق البروكسي نشط",
     "Tunnel worker running · internet not verified" to "محرك النفق يعمل · لم يتم التحقق من الإنترنت بعد",
+    "Tunnel traffic observed · destination not verified" to "تم رصد مرور بيانات عبر النفق · لم يتم التحقق من الوجهة",
     "Running" to "يعمل",
     "Proxy tunnel stopped" to "نفق البروكسي متوقف",
     "Sent" to "مرسل",
