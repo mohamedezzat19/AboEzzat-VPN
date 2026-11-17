@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">AboEzzat VPN</string>
+    <string name="app_name">AboEzzat Proxy</string>
     <string name="proxy_browser_title">Proxy-only browser</string>
     <string name="proxy_browser_address">Address</string>
     <string name="proxy_browser_go">Go</string>
