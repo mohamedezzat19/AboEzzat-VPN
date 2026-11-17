@@ -17,8 +17,9 @@ use socks::SocksProxyManager;
 pub use socks5_impl::UserKey;
 #[cfg(feature = "udpgw")]
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+#[cfg(target_os = "android")]
+use std::ffi::CString;
 use std::{
-    ffi::CString,
     io::ErrorKind,
     net::{IpAddr, SocketAddr},
     os::fd::AsRawFd,
