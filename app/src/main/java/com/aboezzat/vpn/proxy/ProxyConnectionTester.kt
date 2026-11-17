@@ -29,6 +29,9 @@ object ProxyConnectionTester {
         fun elapsedMs() = (System.nanoTime() - start) / 1_000_000
         return try {
             Socket().use { socket ->
+                // Force Android to create the underlying file descriptor before
+                // VpnService.protect(Socket) is called. Keep protection before connect.
+                socket.bind(InetSocketAddress(0))
                 if (protectSocket != null && !protectSocket(socket)) {
                     throw IOException("Could not protect the upstream socket from VPN routing.")
                 }
