@@ -4855,3 +4855,946 @@ object DnsQueryParser {
     private const val OPT_TYPE = 41
 }
 
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/DnsTcpForwarder.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 3975 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.proxy.ProxyProfile
+import com.aboezzat.vpn.proxy.ProxyTcpTunnel
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.IOException
+import java.net.Socket
+
+/** Common contract used by the local UDP bridge for one DNS request/response. */
+fun interface DnsRequestForwarder {
+    @Throws(IOException::class)
+    fun forward(
+        profile: ProxyProfile,
+        resolverHost: String,
+        query: ByteArray,
+        protectSocket: ((Socket) -> Boolean)?
+    ): ByteArray
+}
+
+/**
+ * Sends DNS over TCP through the selected upstream HTTP CONNECT or SOCKS5 proxy.
+ * The resolver connection is not encrypted; use DnsOverTlsForwarder when the
+ * selected resolver supports DNS-over-TLS.
+ */
+class DnsTcpForwarder(
+    private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
+    private val readTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
+    private val maxMessageBytes: Int = MAX_DNS_MESSAGE_BYTES
+) : DnsRequestForwarder {
+    init {
+        require(connectTimeoutMs > 0 && readTimeoutMs > 0)
+        require(maxMessageBytes in DNS_HEADER_BYTES..MAX_DNS_MESSAGE_BYTES)
+    }
+
+    fun forward(
+        profile: ProxyProfile,
+        resolverHost: String,
+        query: ByteArray
+    ): ByteArray = forward(profile, resolverHost, query, null)
+
+    @Throws(IOException::class)
+    override fun forward(
+        profile: ProxyProfile,
+        resolverHost: String,
+        query: ByteArray,
+        protectSocket: ((Socket) -> Boolean)?
+    ): ByteArray {
+        validateQuery(query, maxMessageBytes)
+        val socket = ProxyTcpTunnel.open(
+            profile = profile,
+            destinationHost = resolverHost,
+            destinationPort = DNS_TCP_PORT,
+            connectTimeoutMs = connectTimeoutMs,
+            readTimeoutMs = readTimeoutMs,
+            protectSocket = protectSocket
+        )
+        socket.use {
+            it.soTimeout = readTimeoutMs
+            val input = DataInputStream(it.getInputStream())
+            val output = DataOutputStream(it.getOutputStream())
+            output.writeShort(query.size)
+            output.write(query)
+            output.flush()
+            val responseLength = input.readUnsignedShort()
+            if (responseLength !in DNS_HEADER_BYTES..maxMessageBytes) {
+                throw IOException("DNS resolver returned an invalid message length.")
+            }
+            val response = ByteArray(responseLength)
+            input.readFully(response)
+            validateResponse(query, response)
+            return response
+        }
+    }
+
+    companion object {
+        const val DNS_TCP_PORT = 53
+        const val DEFAULT_TIMEOUT_MS = 7_000
+        const val DNS_HEADER_BYTES = 12
+        const val MAX_DNS_MESSAGE_BYTES = 65_535
+
+        internal fun validateQuery(query: ByteArray, maxMessageBytes: Int) {
+            require(query.size in DNS_HEADER_BYTES..maxMessageBytes) {
+                "DNS query length is outside the supported range."
+            }
+            require(DnsQueryParser.parse(query) != null) {
+                "DNS query is malformed or uses an unsupported query layout."
+            }
+        }
+
+        internal fun validateResponse(query: ByteArray, response: ByteArray) {
+            if (response.size < DNS_HEADER_BYTES) throw IOException("DNS response is too short.")
+            val queryId = readU16(query, 0)
+            val responseId = readU16(response, 0)
+            val flags = readU16(response, 2)
+            if (responseId != queryId) throw IOException("DNS response transaction ID mismatch.")
+            if ((flags and 0x8000) == 0) throw IOException("DNS upstream returned a query, not a response.")
+            if (((flags ushr 11) and 0x0f) != 0) throw IOException("DNS response opcode mismatch.")
+        }
+
+        private fun readU16(bytes: ByteArray, offset: Int): Int =
+            ((bytes[offset].toInt() and 0xff) shl 8) or
+                (bytes[offset + 1].toInt() and 0xff)
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/DnsUdpTcpBridge.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 7058 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.proxy.ProxyProfile
+import java.io.IOException
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.SocketException
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * Localhost-only UDP-to-TCP DNS adapter.
+ *
+ * A future TUN packet engine may send intercepted DNS datagrams to this
+ * loopback endpoint. This class does not capture device traffic or establish
+ * a VPN interface by itself.
+ */
+class DnsUdpTcpBridge(
+    private val forwarder: DnsRequestForwarder = DnsTcpForwarder(),
+    private val maxConcurrentRequests: Int = DEFAULT_MAX_CONCURRENT_REQUESTS,
+    private val queueCapacity: Int = DEFAULT_QUEUE_CAPACITY
+) : AutoCloseable {
+    private val lock = Any()
+    private val received = AtomicLong()
+    private val forwarded = AtomicLong()
+    private val dropped = AtomicLong()
+
+    @Volatile private var datagramSocket: DatagramSocket? = null
+    @Volatile private var worker: Thread? = null
+    @Volatile private var executor: ThreadPoolExecutor? = null
+    @Volatile private var running = false
+
+    data class Stats(
+        val received: Long,
+        val forwarded: Long,
+        val dropped: Long
+    )
+
+    init {
+        require(maxConcurrentRequests > 0)
+        require(queueCapacity > 0)
+    }
+
+    val isRunning: Boolean
+        get() = running
+
+    fun stats(): Stats = Stats(received.get(), forwarded.get(), dropped.get())
+
+    /**
+     * Starts a DNS listener bound only to 127.0.0.1 on an ephemeral port.
+     * The returned address is intended for an in-process packet/TUN adapter.
+     */
+    @Throws(IOException::class)
+    fun start(
+        profile: ProxyProfile,
+        resolverHost: String,
+        protectSocket: ((Socket) -> Boolean)? = null
+    ): InetSocketAddress = synchronized(lock) {
+        check(!running && datagramSocket == null) { "DNS UDP bridge is already running or still shutting down." }
+        require(resolverHost.isNotBlank() && !resolverHost.any(Char::isWhitespace)) {
+            "A resolver hostname or IP is required."
+        }
+
+        val socket = DatagramSocket(null)
+        try {
+            socket.reuseAddress = false
+            socket.bind(InetSocketAddress(InetAddress.getByName(LOOPBACK_HOST), 0))
+            val pool = ThreadPoolExecutor(
+                maxConcurrentRequests,
+                maxConcurrentRequests,
+                0L,
+                TimeUnit.MILLISECONDS,
+                ArrayBlockingQueue(queueCapacity),
+                daemonThreadFactory(),
+                ThreadPoolExecutor.AbortPolicy()
+            )
+            datagramSocket = socket
+            executor = pool
+            running = true
+            val receiveThread = Thread({
+                receiveLoop(socket, pool, profile, resolverHost, protectSocket)
+            }, "AboEzzat-DNS-UDP-Bridge").apply {
+                isDaemon = true
+            }
+            worker = receiveThread
+            receiveThread.start()
+            InetSocketAddress(InetAddress.getByName(LOOPBACK_HOST), socket.localPort)
+        } catch (error: Exception) {
+            running = false
+            datagramSocket = null
+            executor?.shutdownNow()
+            executor = null
+            socket.close()
+            if (error is IOException) throw error
+            throw IOException("Could not start the local DNS bridge.", error)
+        }
+    }
+
+    private fun receiveLoop(
+        socket: DatagramSocket,
+        pool: ThreadPoolExecutor,
+        profile: ProxyProfile,
+        resolverHost: String,
+        protectSocket: ((Socket) -> Boolean)?
+    ) {
+        val buffer = ByteArray(MAX_UDP_PACKET_BYTES)
+        try {
+            while (running && !socket.isClosed) {
+                val packet = DatagramPacket(buffer, buffer.size)
+                try {
+                    socket.receive(packet)
+                } catch (_: SocketException) {
+                    if (running) dropped.incrementAndGet()
+                    break
+                }
+                received.incrementAndGet()
+                val query = packet.data.copyOfRange(packet.offset, packet.offset + packet.length)
+                val clientAddress = packet.socketAddress
+                try {
+                    pool.execute {
+                        try {
+                            val response = forwarder.forward(profile, resolverHost, query, protectSocket)
+                            if (running && response.size <= MAX_UDP_PACKET_BYTES) {
+                                val reply = DatagramPacket(response, response.size, clientAddress)
+                                socket.send(reply)
+                                forwarded.incrementAndGet()
+                            } else {
+                                dropped.incrementAndGet()
+                            }
+                        } catch (_: Exception) {
+                            // DNS transport failures are counted and dropped; never leak
+                            // the query onto the device's direct network as a fallback.
+                            dropped.incrementAndGet()
+                        }
+                    }
+                } catch (_: RejectedExecutionException) {
+                    dropped.incrementAndGet()
+                }
+            }
+        } finally {
+            synchronized(lock) {
+                if (datagramSocket === socket) {
+                    running = false
+                    datagramSocket = null
+                    executor = null
+                    worker = null
+                }
+            }
+            pool.shutdownNow()
+            socket.close()
+        }
+    }
+
+    override fun close() {
+        val socket: DatagramSocket?
+        val pool: ThreadPoolExecutor?
+        val thread: Thread?
+        synchronized(lock) {
+            running = false
+            socket = datagramSocket
+            pool = executor
+            thread = worker
+            datagramSocket = null
+            executor = null
+            worker = null
+        }
+        socket?.close()
+        pool?.shutdownNow()
+        if (thread != null && thread !== Thread.currentThread()) {
+            try {
+                thread.join(CLOSE_JOIN_TIMEOUT_MS)
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    private fun daemonThreadFactory() = ThreadFactory { runnable ->
+        Thread(runnable, "AboEzzat-DNS-Forward").apply { isDaemon = true }
+    }
+
+    companion object {
+        const val LOOPBACK_HOST = "127.0.0.1"
+        const val MAX_UDP_PACKET_BYTES = 65_507
+        const val DEFAULT_MAX_CONCURRENT_REQUESTS = 8
+        const val DEFAULT_QUEUE_CAPACITY = 32
+        const val CLOSE_JOIN_TIMEOUT_MS = 1_000L
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/Ipv4ConnectionTupleParser.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 4498 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import java.net.InetAddress
+
+/**
+ * Extracts the 5-tuple needed for Android's connection-owner UID lookup from
+ * an outbound IPv4 TCP or UDP packet read from a future VpnService TUN.
+ *
+ * Fragmented packets are rejected because the transport ports may not exist
+ * in every fragment. IPv6 and non-TCP/UDP protocols are not supported here.
+ */
+object Ipv4ConnectionTupleParser {
+    fun parseOutbound(packet: ByteArray): NetworkConnectionTuple {
+        require(packet.size >= IPV4_MIN_HEADER_BYTES) { "IPv4 packet is too short." }
+        val versionAndIhl = u8(packet, 0)
+        require((versionAndIhl ushr 4) == IPV4_VERSION) { "Only IPv4 is supported." }
+
+        val ipHeaderLength = (versionAndIhl and 0x0f) * 4
+        require(ipHeaderLength in IPV4_MIN_HEADER_BYTES..IPV4_MAX_HEADER_BYTES) {
+            "Invalid IPv4 header length."
+        }
+        require(packet.size >= ipHeaderLength) { "IPv4 header is truncated." }
+
+        val totalLength = u16(packet, 2)
+        require(totalLength == packet.size && totalLength >= ipHeaderLength) {
+            "IPv4 total length does not match packet size."
+        }
+        require(checksum(packet, 0, ipHeaderLength) == 0) {
+            "Invalid IPv4 header checksum."
+        }
+
+        val fragmentField = u16(packet, 6)
+        require((fragmentField and RESERVED_FLAG) == 0) {
+            "IPv4 reserved fragment flag must be zero."
+        }
+        require((fragmentField and FRAGMENT_MASK) == 0) {
+            "Fragmented IPv4 packets are not supported for UID lookup."
+        }
+
+        val protocol = when (u8(packet, 9)) {
+            TCP_PROTOCOL -> IpTransportProtocol.TCP
+            UDP_PROTOCOL -> IpTransportProtocol.UDP
+            else -> throw IllegalArgumentException("Only TCP and UDP packets can be attributed.")
+        }
+
+        val transportOffset = ipHeaderLength
+        val transportLength = totalLength - ipHeaderLength
+        require(transportLength >= if (protocol == IpTransportProtocol.TCP) TCP_MIN_HEADER_BYTES else UDP_HEADER_BYTES) {
+            "Transport header is truncated."
+        }
+
+        val sourcePort = u16(packet, transportOffset)
+        val destinationPort = u16(packet, transportOffset + 2)
+        require(sourcePort in 1..65535 && destinationPort in 1..65535) {
+            "Invalid transport port."
+        }
+
+        when (protocol) {
+            IpTransportProtocol.TCP -> {
+                val tcpHeaderLength = (u8(packet, transportOffset + 12) ushr 4) * 4
+                require(tcpHeaderLength in TCP_MIN_HEADER_BYTES..transportLength) {
+                    "Invalid TCP data offset."
+                }
+            }
+            IpTransportProtocol.UDP -> {
+                val udpLength = u16(packet, transportOffset + 4)
+                require(udpLength == transportLength && udpLength >= UDP_HEADER_BYTES) {
+                    "Invalid UDP length."
+                }
+            }
+        }
+
+        val localAddress = InetAddress.getByAddress(packet.copyOfRange(12, 16))
+        val remoteAddress = InetAddress.getByAddress(packet.copyOfRange(16, 20))
+        return NetworkConnectionTuple(
+            protocol = protocol,
+            local = java.net.InetSocketAddress(localAddress, sourcePort),
+            remote = java.net.InetSocketAddress(remoteAddress, destinationPort)
+        )
+    }
+
+    private fun checksum(bytes: ByteArray, offset: Int, length: Int): Int {
+        var sum = 0L
+        var index = 0
+        while (index + 1 < length) {
+            sum += ((bytes[offset + index].toInt() and 0xff) shl 8) or
+                (bytes[offset + index + 1].toInt() and 0xff)
+            index += 2
+        }
+        if (index < length) sum += (bytes[offset + index].toInt() and 0xff) shl 8
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun u8(bytes: ByteArray, offset: Int): Int =
+        bytes[offset].toInt() and 0xff
+
+    private fun u16(bytes: ByteArray, offset: Int): Int =
+        (u8(bytes, offset) shl 8) or u8(bytes, offset + 1)
+
+    private const val IPV4_VERSION = 4
+    private const val IPV4_MIN_HEADER_BYTES = 20
+    private const val IPV4_MAX_HEADER_BYTES = 60
+    private const val TCP_MIN_HEADER_BYTES = 20
+    private const val UDP_HEADER_BYTES = 8
+    private const val TCP_PROTOCOL = 6
+    private const val UDP_PROTOCOL = 17
+    private const val RESERVED_FLAG = 0x8000
+    private const val FRAGMENT_MASK = 0x3fff
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/Ipv4TcpPacketParser.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 5929 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+/**
+ * Parses complete, unfragmented outbound IPv4/TCP packets for a future TCP
+ * session engine. This is a packet decoder only: it does not create sockets,
+ * acknowledge packets, or establish a VPN interface.
+ */
+object Ipv4TcpPacketParser {
+    data class Packet(
+        val tuple: NetworkConnectionTuple,
+        val sequenceNumber: Long,
+        val acknowledgementNumber: Long,
+        val flags: Int,
+        val windowSize: Int,
+        val urgentPointer: Int,
+        val ipHeaderLength: Int,
+        val tcpHeaderLength: Int,
+        val ipOptions: ByteArray,
+        val tcpOptions: ByteArray,
+        val payload: ByteArray
+    ) {
+        val isFin: Boolean get() = flags and FLAG_FIN != 0
+        val isSyn: Boolean get() = flags and FLAG_SYN != 0
+        val isRst: Boolean get() = flags and FLAG_RST != 0
+        val isPsh: Boolean get() = flags and FLAG_PSH != 0
+        val isAck: Boolean get() = flags and FLAG_ACK != 0
+        val isUrg: Boolean get() = flags and FLAG_URG != 0
+        val isEce: Boolean get() = flags and FLAG_ECE != 0
+        val isCwr: Boolean get() = flags and FLAG_CWR != 0
+        val isNs: Boolean get() = flags and FLAG_NS != 0
+    }
+
+    fun parse(packet: ByteArray): Packet {
+        val tuple = Ipv4ConnectionTupleParser.parseOutbound(packet)
+        require(tuple.protocol == IpTransportProtocol.TCP) { "IPv4 packet is not TCP." }
+
+        val ipHeaderLength = (u8(packet, 0) and 0x0f) * 4
+        val tcpOffset = ipHeaderLength
+        val tcpLength = packet.size - tcpOffset
+        val dataOffsetAndReserved = u8(packet, tcpOffset + 12)
+        require((dataOffsetAndReserved and RESERVED_TCP_BITS) == 0) {
+            "TCP reserved bits must be zero."
+        }
+        val tcpHeaderLength = (dataOffsetAndReserved ushr 4) * 4
+        require(tcpHeaderLength in TCP_MIN_HEADER_BYTES..tcpLength) {
+            "Invalid TCP data offset."
+        }
+
+        val flags = ((dataOffsetAndReserved and NS_MASK) shl 8) or u8(packet, tcpOffset + 13)
+        val sourceAddress = packet.copyOfRange(12, 16)
+        val destinationAddress = packet.copyOfRange(16, 20)
+        require(validTcpChecksum(sourceAddress, destinationAddress, packet, tcpOffset, tcpLength)) {
+            "Invalid TCP checksum."
+        }
+
+        val tcpOptions = packet.copyOfRange(tcpOffset + TCP_MIN_HEADER_BYTES, tcpOffset + tcpHeaderLength)
+        validateTcpOptions(tcpOptions)
+
+        return Packet(
+            tuple = tuple,
+            sequenceNumber = u32(packet, tcpOffset + 4),
+            acknowledgementNumber = u32(packet, tcpOffset + 8),
+            flags = flags,
+            windowSize = u16(packet, tcpOffset + 14),
+            urgentPointer = u16(packet, tcpOffset + 18),
+            ipHeaderLength = ipHeaderLength,
+            tcpHeaderLength = tcpHeaderLength,
+            ipOptions = packet.copyOfRange(IPV4_MIN_HEADER_BYTES, ipHeaderLength),
+            tcpOptions = tcpOptions,
+            payload = packet.copyOfRange(tcpOffset + tcpHeaderLength, packet.size)
+        )
+    }
+
+    private fun validateTcpOptions(options: ByteArray) {
+        var index = 0
+        while (index < options.size) {
+            when (val kind = u8(options, index)) {
+                OPTION_END -> return
+                OPTION_NOP -> index += 1
+                else -> {
+                    require(index + 1 < options.size) { "Truncated TCP option length." }
+                    val length = u8(options, index + 1)
+                    require(length >= 2 && index + length <= options.size) {
+                        "Invalid TCP option length for kind $kind."
+                    }
+                    index += length
+                }
+            }
+        }
+    }
+
+    private fun validTcpChecksum(
+        source: ByteArray,
+        destination: ByteArray,
+        packet: ByteArray,
+        offset: Int,
+        length: Int
+    ): Boolean {
+        var sum = 0L
+        for (index in 0 until 4 step 2) {
+            sum += ((source[index].toInt() and 0xff) shl 8) or (source[index + 1].toInt() and 0xff)
+            sum += ((destination[index].toInt() and 0xff) shl 8) or (destination[index + 1].toInt() and 0xff)
+        }
+        sum += TCP_PROTOCOL
+        sum += length
+        sum = addWords(sum, packet, offset, length)
+        return finishChecksum(sum) == 0
+    }
+
+    private fun addWords(initial: Long, bytes: ByteArray, offset: Int, length: Int): Long {
+        var sum = initial
+        var index = 0
+        while (index + 1 < length) {
+            sum += ((bytes[offset + index].toInt() and 0xff) shl 8) or
+                (bytes[offset + index + 1].toInt() and 0xff)
+            index += 2
+        }
+        if (index < length) sum += (bytes[offset + index].toInt() and 0xff) shl 8
+        return sum
+    }
+
+    private fun finishChecksum(value: Long): Int {
+        var sum = value
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun u8(bytes: ByteArray, offset: Int): Int = bytes[offset].toInt() and 0xff
+
+    private fun u16(bytes: ByteArray, offset: Int): Int =
+        (u8(bytes, offset) shl 8) or u8(bytes, offset + 1)
+
+    private fun u32(bytes: ByteArray, offset: Int): Long =
+        ((u16(bytes, offset).toLong() shl 16) or u16(bytes, offset + 2).toLong()) and 0xffff_ffffL
+
+    private const val IPV4_MIN_HEADER_BYTES = 20
+    private const val TCP_MIN_HEADER_BYTES = 20
+    private const val TCP_PROTOCOL = 6
+    private const val RESERVED_TCP_BITS = 0x0e
+    private const val NS_MASK = 0x01
+    private const val OPTION_END = 0
+    private const val OPTION_NOP = 1
+
+    const val FLAG_FIN = 0x001
+    const val FLAG_SYN = 0x002
+    const val FLAG_RST = 0x004
+    const val FLAG_PSH = 0x008
+    const val FLAG_ACK = 0x010
+    const val FLAG_URG = 0x020
+    const val FLAG_ECE = 0x040
+    const val FLAG_CWR = 0x080
+    const val FLAG_NS = 0x100
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketCodec.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 8169 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+
+/**
+ * Strict IPv4/UDP DNS packet codec for a future TUN packet loop.
+ *
+ * It intentionally rejects fragments and non-IPv4 traffic. It does not open
+ * sockets, capture traffic, or establish a VPN interface.
+ */
+object Ipv4UdpDnsPacketCodec {
+    data class Query(
+        val sourceAddress: ByteArray,
+        val destinationAddress: ByteArray,
+        val sourcePort: Int,
+        val destinationPort: Int,
+        val identification: Int,
+        val dscpEcn: Int,
+        val dontFragment: Boolean,
+        val ttl: Int,
+        val ipOptions: ByteArray,
+        val dnsPayload: ByteArray
+    )
+
+    fun parseQuery(packet: ByteArray): Query {
+        require(packet.size >= MIN_PACKET_BYTES) { "IPv4 UDP packet is too short." }
+        val versionAndIhl = u8(packet, 0)
+        require((versionAndIhl ushr 4) == IPV4_VERSION) { "Only IPv4 packets are supported." }
+        val headerLength = (versionAndIhl and 0x0f) * 4
+        require(headerLength in IPV4_MIN_HEADER_BYTES..IPV4_MAX_HEADER_BYTES) {
+            "Invalid IPv4 header length."
+        }
+        require(packet.size >= headerLength + UDP_HEADER_BYTES) { "IPv4 packet is truncated." }
+
+        val totalLength = u16(packet, 2)
+        require(totalLength == packet.size && totalLength >= headerLength + UDP_HEADER_BYTES) {
+            "IPv4 total length does not match the packet."
+        }
+        require(checksum(packet, 0, headerLength) == 0) { "Invalid IPv4 header checksum." }
+        require(u8(packet, 9) == UDP_PROTOCOL) { "IPv4 packet is not UDP." }
+
+        val fragmentField = u16(packet, 6)
+        require((fragmentField and RESERVED_FLAG) == 0) {
+            "IPv4 reserved fragment flag must be zero."
+        }
+        require((fragmentField and FRAGMENT_MASK) == 0) {
+            "Fragmented IPv4 UDP packets are not supported."
+        }
+
+        val udpOffset = headerLength
+        val udpLength = u16(packet, udpOffset + 4)
+        require(udpLength >= UDP_HEADER_BYTES && headerLength + udpLength == totalLength) {
+            "Invalid UDP length."
+        }
+        val sourcePort = u16(packet, udpOffset)
+        val destinationPort = u16(packet, udpOffset + 2)
+        require(destinationPort == DNS_PORT) { "UDP destination is not the DNS port." }
+
+        val sourceAddress = packet.copyOfRange(12, 16)
+        val destinationAddress = packet.copyOfRange(16, 20)
+        val udpChecksum = u16(packet, udpOffset + 6)
+        if (udpChecksum != 0) {
+            require(verifyUdpChecksum(sourceAddress, destinationAddress, packet, udpOffset, udpLength)) {
+                "Invalid UDP checksum."
+            }
+        }
+
+        val dns = packet.copyOfRange(udpOffset + UDP_HEADER_BYTES, totalLength)
+        require(DnsQueryParser.parse(dns) != null) { "Malformed or unsupported DNS query." }
+
+        return Query(
+            sourceAddress = sourceAddress,
+            destinationAddress = destinationAddress,
+            sourcePort = sourcePort,
+            destinationPort = destinationPort,
+            identification = u16(packet, 4),
+            dscpEcn = u8(packet, 1),
+            dontFragment = (fragmentField and DONT_FRAGMENT_FLAG) != 0,
+            ttl = u8(packet, 8),
+            ipOptions = packet.copyOfRange(IPV4_MIN_HEADER_BYTES, headerLength),
+            dnsPayload = dns
+        )
+    }
+
+    fun buildResponse(query: Query, dnsResponse: ByteArray, ttl: Int = DEFAULT_TTL): ByteArray {
+        require(ttl in 1..255) { "TTL must be between 1 and 255." }
+        require(dnsResponse.size in DnsTcpForwarder.DNS_HEADER_BYTES..DnsTcpForwarder.MAX_DNS_MESSAGE_BYTES) {
+            "DNS response length is outside the supported range."
+        }
+        val validDnsResponse = try {
+            DnsTcpForwarder.validateResponse(query.dnsPayload, dnsResponse)
+            true
+        } catch (_: Exception) {
+            false
+        }
+        require(validDnsResponse) { "DNS response does not match the original query." }
+
+        val ipHeaderLength = IPV4_MIN_HEADER_BYTES + query.ipOptions.size
+        require(ipHeaderLength <= IPV4_MAX_HEADER_BYTES && ipHeaderLength % 4 == 0) {
+            "Invalid saved IPv4 options."
+        }
+        val udpLength = UDP_HEADER_BYTES + dnsResponse.size
+        val totalLength = ipHeaderLength + udpLength
+        require(totalLength <= MAX_IPV4_PACKET_BYTES) { "DNS response exceeds the IPv4 packet limit." }
+
+        val packet = ByteArray(totalLength)
+        packet[0] = ((IPV4_VERSION shl 4) or (ipHeaderLength / 4)).toByte()
+        packet[1] = query.dscpEcn.toByte()
+        putU16(packet, 2, totalLength)
+        putU16(packet, 4, query.identification)
+        putU16(packet, 6, if (query.dontFragment) DONT_FRAGMENT_FLAG else 0)
+        packet[8] = ttl.toByte()
+        packet[9] = UDP_PROTOCOL.toByte()
+        query.destinationAddress.copyInto(packet, 12)
+        query.sourceAddress.copyInto(packet, 16)
+        query.ipOptions.copyInto(packet, IPV4_MIN_HEADER_BYTES)
+
+        val udpOffset = ipHeaderLength
+        putU16(packet, udpOffset, query.destinationPort)
+        putU16(packet, udpOffset + 2, query.sourcePort)
+        putU16(packet, udpOffset + 4, udpLength)
+        dnsResponse.copyInto(packet, udpOffset + UDP_HEADER_BYTES)
+
+        var udpSum = udpChecksum(
+            query.destinationAddress,
+            query.sourceAddress,
+            packet,
+            udpOffset,
+            udpLength
+        )
+        if (udpSum == 0) udpSum = 0xffff
+        putU16(packet, udpOffset + 6, udpSum)
+        putU16(packet, 10, checksum(packet, 0, ipHeaderLength))
+        return packet
+    }
+
+    private fun verifyUdpChecksum(
+        source: ByteArray,
+        destination: ByteArray,
+        packet: ByteArray,
+        offset: Int,
+        length: Int
+    ): Boolean = udpChecksum(source, destination, packet, offset, length) == 0
+
+    private fun udpChecksum(
+        source: ByteArray,
+        destination: ByteArray,
+        packet: ByteArray,
+        offset: Int,
+        length: Int
+    ): Int {
+        var sum = 0L
+        for (i in 0 until 4 step 2) {
+            sum += ((source[i].toInt() and 0xff) shl 8) or (source[i + 1].toInt() and 0xff)
+            sum += ((destination[i].toInt() and 0xff) shl 8) or (destination[i + 1].toInt() and 0xff)
+        }
+        sum += UDP_PROTOCOL
+        sum += length
+        sum = addWords(sum, packet, offset, length)
+        return finishChecksum(sum)
+    }
+
+    private fun checksum(bytes: ByteArray, offset: Int, length: Int): Int =
+        finishChecksum(addWords(0L, bytes, offset, length))
+
+    private fun addWords(initial: Long, bytes: ByteArray, offset: Int, length: Int): Long {
+        var sum = initial
+        var index = 0
+        while (index + 1 < length) {
+            sum += ((bytes[offset + index].toInt() and 0xff) shl 8) or
+                (bytes[offset + index + 1].toInt() and 0xff)
+            index += 2
+        }
+        if (index < length) sum += (bytes[offset + index].toInt() and 0xff) shl 8
+        return sum
+    }
+
+    private fun finishChecksum(value: Long): Int {
+        var sum = value
+        while ((sum ushr 16) != 0L) sum = (sum and 0xffff) + (sum ushr 16)
+        return sum.toInt().inv() and 0xffff
+    }
+
+    private fun u8(bytes: ByteArray, offset: Int): Int = bytes[offset].toInt() and 0xff
+
+    private fun u16(bytes: ByteArray, offset: Int): Int =
+        (u8(bytes, offset) shl 8) or u8(bytes, offset + 1)
+
+    private fun putU16(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value ushr 8).toByte()
+        bytes[offset + 1] = value.toByte()
+    }
+
+    const val DNS_PORT = 53
+    const val DEFAULT_TTL = 64
+    private const val IPV4_VERSION = 4
+    private const val IPV4_MIN_HEADER_BYTES = 20
+    private const val IPV4_MAX_HEADER_BYTES = 60
+    private const val UDP_HEADER_BYTES = 8
+    private const val MIN_PACKET_BYTES = IPV4_MIN_HEADER_BYTES + UDP_HEADER_BYTES + DnsTcpForwarder.DNS_HEADER_BYTES
+    private const val UDP_PROTOCOL = 17
+    private const val RESERVED_FLAG = 0x8000
+    private const val DONT_FRAGMENT_FLAG = 0x4000
+    private const val FRAGMENT_MASK = 0x3fff
+    private const val MAX_IPV4_PACKET_BYTES = 65_535
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketLoop.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 2570 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import java.io.Closeable
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * TUN-independent packet loop. A real TUN adapter can implement PacketSource
+ * and PacketSink around the file descriptor after this loop is validated.
+ *
+ * Per-packet DNS/resolver failures are counted and skipped; a source or sink
+ * I/O failure exits the loop. This class does not create a VPN interface.
+ */
+interface DnsPacketSource : Closeable {
+    /** Returns the next complete IP packet, or null when the source reaches EOF. */
+    fun readPacket(): ByteArray?
+}
+
+fun interface DnsPacketSink {
+    /** Writes one complete response IP packet back to the packet interface. */
+    fun writePacket(packet: ByteArray)
+}
+
+class Ipv4UdpDnsPacketLoop(
+    private val source: DnsPacketSource,
+    private val sink: DnsPacketSink,
+    private val processor: Ipv4UdpDnsPacketProcessor,
+    private val onPacketError: (Exception) -> Unit = {}
+) {
+    private val started = AtomicBoolean(false)
+    private val stopped = AtomicBoolean(false)
+    private val sourceClosed = AtomicBoolean(false)
+    private val processedCount = AtomicLong(0)
+    private val failedCount = AtomicLong(0)
+
+    val processedPackets: Long get() = processedCount.get()
+    val failedPackets: Long get() = failedCount.get()
+
+    /**
+     * Runs on the caller's worker thread until EOF, stop(), or an I/O failure.
+     * Call stop() from another thread to close a blocking source read.
+     */
+    fun run() {
+        check(started.compareAndSet(false, true)) {
+            "Packet loop can only be run once."
+        }
+        try {
+            while (!stopped.get()) {
+                val packet = source.readPacket() ?: break
+                val response = try {
+                    processor.process(packet)
+                } catch (error: Exception) {
+                    failedCount.incrementAndGet()
+                    try {
+                        onPacketError(error)
+                    } catch (_: Exception) {
+                        // Diagnostics must not terminate packet processing.
+                    }
+                    continue
+                }
+                sink.writePacket(response)
+                processedCount.incrementAndGet()
+            }
+        } finally {
+            closeSource()
+        }
+    }
+
+    fun stop() {
+        stopped.set(true)
+        closeSource()
+    }
+
+    private fun closeSource() {
+        if (sourceClosed.compareAndSet(false, true)) {
+            source.close()
+        }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/main/java/com/aboezzat/vpn/vpn/Ipv4UdpDnsPacketProcessor.kt
+المجلد: app/src/main/java/com/aboezzat/vpn/vpn
+وظيفة الملف: خدمة VPN والنفق وتحليل الحزم وDNS وحماية السوكيتات.
+الحجم الأصلي: 1175 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+/**
+ * Connects the strict IPv4/UDP DNS packet codec to a configured DNS resolver.
+ *
+ * The caller supplies a resolver that forwards one raw DNS query and returns
+ * its raw DNS response (for example DnsTcpForwarder or DnsOverTlsForwarder).
+ * This class is deliberately independent of VpnService/TUN lifecycle.
+ */
+fun interface DnsPacketResolver {
+    fun resolve(query: ByteArray): ByteArray
+}
+
+class Ipv4UdpDnsPacketProcessor(
+    private val resolver: DnsPacketResolver,
+    private val responseTtl: Int = Ipv4UdpDnsPacketCodec.DEFAULT_TTL
+) {
+    init {
+        require(responseTtl in 1..255) { "Response TTL must be between 1 and 255." }
+    }
+
+    /**
+     * Returns a complete IPv4/UDP DNS response packet.
+     * Invalid or unsupported input and resolver failures are surfaced to the
+     * caller; no synthetic success or direct-network fallback is attempted.
+     */
+    fun process(packet: ByteArray): ByteArray {
+        val query = Ipv4UdpDnsPacketCodec.parseQuery(packet)
+        val response = resolver.resolve(query.dnsPayload.copyOf())
+        return Ipv4UdpDnsPacketCodec.buildResponse(query, response, responseTtl)
+    }
+}
+
