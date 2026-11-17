@@ -40,7 +40,7 @@ The first stage must isolate the upstream proxy from Android VPN routing:
 
 - HTTP CONNECT to a known HTTPS destination: proxy handshake, TLS handshake, and actual HTTP response body.
 - SOCKS5 CONNECT to both a domain name and an IP address; no-auth and username/password paths.
-- DNS A and AAAA, plus SRV, TXT, HTTPS/SVCB and TCP fallback queries, all sent through the proxy with no direct DNS fallback.
+- DNS A/AAAA virtual hostname mapping, plus SRV, TXT, HTTPS/SVCB and TCP fallback queries forwarded through the proxy with no direct DNS fallback.
 - SOCKS5 UDP ASSOCIATE: verify the control TCP socket stays open, the advertised relay address is usable, the UDP response comes from the relay, and the DNS response has RCODE 0 and a real answer.
 - Test a non-DNS UDP destination separately. A DNS datagram round-trip alone is not a QUIC test.
 - Record exact connect/handshake durations and errors. No TUN should be running during these baseline tests.
