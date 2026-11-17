@@ -50,7 +50,7 @@ class ProxyTcpTunnelTest {
                 destinationHost = "example.com",
                 destinationPort = 443,
                 protectSocket = { socket ->
-                    protectedBeforeConnect.set(!socket.isConnected)
+                    protectedBeforeConnect.set(socket.isBound && !socket.isConnected)
                     true
                 }
             )
@@ -62,7 +62,7 @@ class ProxyTcpTunnelTest {
                 assertEquals("pong", String(response, Charsets.US_ASCII))
             }
             worker.join(3000)
-            assertTrue("protect() callback must run before connect", protectedBeforeConnect.get())
+            assertTrue("protect() must run after bind and before connect", protectedBeforeConnect.get())
             assertTrue("HTTP CONNECT request must include destination and auth", requestValid.get())
             serverFailure.get()?.let { throw AssertionError("Mock HTTP proxy failed", it) }
         } finally {
