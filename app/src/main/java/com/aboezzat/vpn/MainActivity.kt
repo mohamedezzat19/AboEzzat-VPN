@@ -627,6 +627,14 @@ private fun Dashboard(store: ProxyProfileStore) {
                             Spacer(Modifier.weight(1f))
                             Text(tx(if (profile.username.isNullOrEmpty()) "No authentication" else "Authentication saved securely"), color = Muted, fontSize = 10.sp)
                         }
+                        if (profile.protocol == ProxyProtocol.HTTP_CONNECT) {
+                            Text(
+                                tx("HTTP CONNECT carries TCP only. UDP and QUIC apps may fail; use a SOCKS5 profile on the server's SOCKS5 port for full UDP support."),
+                                color = Color(0xFFFFC66D),
+                                fontSize = 10.sp,
+                                lineHeight = 14.sp
+                            )
+                        }
                         Button(
                             onClick = {
                                 testing[profile.name] = true
@@ -1319,7 +1327,8 @@ private val arabicUi = mapOf(
     "Username and password must both be provided, or both left empty" to "يجب إدخال اسم المستخدم وكلمة المرور معًا أو تركهما فارغين",
     "HTTP CONNECT" to "HTTP CONNECT",
     "SOCKS5" to "SOCKS5",
-    "Select the same protocol enabled in Android Server Proxy. HTTP/HTTPS uses HTTP CONNECT; choose SOCKS5 only if the server offers SOCKS5." to "اختر نفس البروتوكول المفعّل في Android Server Proxy. خيار HTTP/HTTPS يستخدم HTTP CONNECT؛ اختر SOCKS5 فقط إذا كان الخادم يوفره."
+    "Select the same protocol enabled in Android Server Proxy. HTTP/HTTPS uses HTTP CONNECT; choose SOCKS5 only if the server offers SOCKS5." to "اختر نفس البروتوكول المفعّل في Android Server Proxy. خيار HTTP/HTTPS يستخدم HTTP CONNECT؛ اختر SOCKS5 فقط إذا كان الخادم يوفره.",
+    "HTTP CONNECT carries TCP only. UDP and QUIC apps may fail; use a SOCKS5 profile on the server's SOCKS5 port for full UDP support." to "بروتوكول HTTP CONNECT ينقل TCP فقط. قد تفشل التطبيقات التي تعتمد على UDP وQUIC؛ استخدم ملف SOCKS5 على منفذ SOCKS5 في الخادم لدعم UDP بالكامل."
 )
 
 @Composable
@@ -1425,6 +1434,14 @@ private fun ProfileEditorDialog(
                     fontSize = 10.sp,
                     lineHeight = 14.sp
                 )
+                if (protocol == ProxyProtocol.HTTP_CONNECT) {
+                    Text(
+                        tx("HTTP CONNECT carries TCP only. UDP and QUIC apps may fail; use a SOCKS5 profile on the server's SOCKS5 port for full UDP support."),
+                        color = Color(0xFFFFC66D),
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp
+                    )
+                }
                 Divider(color = Color(0xFF33415B))
                 Text(tx("AUTHENTICATION (OPTIONAL)"), color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text(tx("Username")) }, singleLine = true)
