@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::Result;
 use std::os::raw::c_void;
 use std::sync::{
     LazyLock, Mutex,
