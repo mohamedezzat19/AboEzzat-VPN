@@ -68,6 +68,8 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -177,6 +179,8 @@ private fun Dashboard(store: ProxyProfileStore) {
         mutableStateMapOf<String, RouteMode>().apply { putAll(routeStore.load()) }
     }
     var routeSearch by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableStateOf("PROXIES") }
+    var loggingText by remember { mutableStateOf(ConnectionDiagnostics.read(context)) }
     var showAppsPage by remember { mutableStateOf(false) }
     var showDiagnostics by remember { mutableStateOf(false) }
     var diagnosticsText by remember { mutableStateOf("") }
@@ -447,6 +451,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             }
         }
     ) {
+    if (selectedTab == "PROXIES") {
     Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
         Column(
             modifier = Modifier.fillMaxSize().background(Midnight)
@@ -859,6 +864,77 @@ private fun Dashboard(store: ProxyProfileStore) {
             Spacer(Modifier.height(12.dp))
             Text(tx("ABOEZZAT VPN  •  PRIVATE NETWORK CONTROL"), color = Muted, fontSize = 10.sp, letterSpacing = 1.sp, modifier = Modifier.align(Alignment.CenterHorizontally))
         }
+    }
+    } else if (selectedTab == "LOGGING") {
+        Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
+            Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("LOGGING", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                Text(tx("Connection activity"), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                Text(tx("This view shows recorded VPN and proxy engine events only. Android app-level connection attribution is not available yet, so no app names or Connected states are fabricated."), color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { loggingText = ConnectionDiagnostics.read(context) }) { Text(tx("Refresh")) }
+                    OutlinedButton(onClick = {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("AboEzzat VPN log", loggingText))
+                        notice = "Log copied"
+                    }) { Text(tx("Copy")) }
+                    OutlinedButton(onClick = { ConnectionDiagnostics.clear(context); loggingText = "" }) { Text(tx("Clear")) }
+                }
+                Surface(modifier = Modifier.weight(1f).fillMaxWidth(), color = Panel, shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp)) {
+                        Text(loggingText.ifBlank { tx("No connection events recorded yet. Start a proxy session and refresh this page.") }, color = if (loggingText.isBlank()) Muted else Color(0xFFD6E2F2), fontSize = 11.sp, lineHeight = 17.sp)
+                    }
+                }
+            }
+        }
+    } else {
+        Surface(modifier = Modifier.fillMaxSize(), color = Midnight) {
+            Column(Modifier.fillMaxSize().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("SETTINGS", color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                Text(tx("Settings"), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
+                Card(modifier = Modifier.fillMaxWidth().clickable { showAppsPage = true }, colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tx("Installed apps & routing"), color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text("${installedApps.size} ${tx("installed apps")}", color = Muted, fontSize = 11.sp)
+                        }
+                        Text("›", color = Accent, fontSize = 26.sp)
+                    }
+                }
+                Card(modifier = Modifier.fillMaxWidth().clickable { showDiagnostics = true; diagnosticsText = ConnectionDiagnostics.read(context) }, colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(tx("Connection diagnostics"), color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(tx("Tunnel state, socket protection and engine events"), color = Muted, fontSize = 11.sp)
+                        }
+                        Text("›", color = Accent, fontSize = 26.sp)
+                    }
+                }
+                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(tx("App updates"), color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            when { updateChecking -> tx("Checking GitHub Releases…"); updateDownloading -> tx("Downloading update…"); updateInfo != null -> "${tx("New version available")}: ${updateInfo?.versionName}"; updateError.isNotBlank() -> tx("Update check needs attention"); else -> tx("You're using the latest version") },
+                            color = Muted, fontSize = 11.sp
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { checkForAppUpdate() }, enabled = !updateChecking && !updateDownloading) { Text(tx("Check")) }
+                            if (updateInfo != null && downloadedApk == null) Button(onClick = { downloadAppUpdate() }, enabled = !updateDownloading) { Text(tx("Download update")) }
+                            if (downloadedApk != null) Button(onClick = { installAppUpdate(downloadedApk!!) }) { Text(tx("Install update")) }
+                        }
+                    }
+                }
+                TextButton(onClick = {
+                    val current = context.resources.configuration.locales[0].language
+                    AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(if (current == "ar") "en" else "ar"))
+                }) { Text(if (context.resources.configuration.locales[0].language == "ar") "English" else "العربية", color = Accent) }
+            }
+        }
+    }
+    NavigationBar(containerColor = Panel, contentColor = Color.White) {
+        NavigationBarItem(selected = selectedTab == "PROXIES", onClick = { selectedTab = "PROXIES" }, icon = { Text("▦") }, label = { Text(tx("Proxies")) })
+        NavigationBarItem(selected = selectedTab == "LOGGING", onClick = { selectedTab = "LOGGING"; loggingText = ConnectionDiagnostics.read(context) }, icon = { Text("≡") }, label = { Text(tx("Logging")) })
+        NavigationBarItem(selected = selectedTab == "SETTINGS", onClick = { selectedTab = "SETTINGS" }, icon = { Text("⚙") }, label = { Text(tx("Settings")) })
     }
     }
 
