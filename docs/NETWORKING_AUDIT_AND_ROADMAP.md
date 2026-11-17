@@ -17,7 +17,7 @@ Stop speculative one-off patches. Establish one reproducible data path, test eac
 - `addDisallowedApplication` implements direct bypass. The remaining route labels do not currently map to separate per-app packet paths.
 - There is no proxy server implementation in this repository and no complete device-wide proxy-only mode. A proxy-only stage can validate the upstream transport and app-level proxy use; device-wide capture of arbitrary Android apps requires the VPN stage.
 
-## Confirmed code gaps
+## Findings and corrective changes
 
 1. **Virtual DNS record coverage:** the virtual DNS generator creates synthetic answers for A and AAAA. Other record types previously became empty responses. The current hybrid-DNS change preserves synthetic A/AAAA mapping and forwards unsupported UDP/TCP queries through the configured resolver over the proxy.
 2. **TCP session cleanup:** the TCP relay used `tokio::join!` for both directions. If one direction errors while the other remains blocked, the session can remain alive unnecessarily. It should preserve normal half-close behavior but cancel the opposite direction on error.

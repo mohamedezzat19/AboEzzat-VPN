@@ -1477,6 +1477,23 @@ mod dns_tcp_response_tests {
     }
 
     #[test]
+    fn virtual_dns_tcp_query_decoder_handles_split_prefix_body_and_coalesced_frames() {
+        let mut pending = Vec::new();
+        assert!(decode_dns_tcp_queries(&mut pending, &[0]).unwrap().is_empty());
+        assert!(decode_dns_tcp_queries(&mut pending, &[3, 1]).unwrap().is_empty());
+        assert_eq!(pending, vec![0, 3, 1]);
+
+        let queries = decode_dns_tcp_queries(&mut pending, &[2, 3, 0, 2, 4, 5]).unwrap();
+        assert_eq!(queries, vec![vec![1, 2, 3], vec![4, 5]]);
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn virtual_dns_tcp_query_decoder_rejects_empty_frames() {
+        assert!(decode_dns_tcp_queries(&mut Vec::new(), &[0, 0]).is_err());
+    }
+
+    #[test]
     fn dns_tcp_responses_survive_split_prefix_and_body() {
         let frame = response_frame("example.org.", RecordType::A);
         let mut pending = Vec::new();
@@ -1676,6 +1693,7 @@ mod virtual_dns_tcp_fallback_tests {
             RecordType::TXT,
         ));
         let query = message.to_vec().unwrap();
+        let expected_query = query.clone();
 
         let mut expected_response = query.clone();
         expected_response[2] |= 0x80;
@@ -1687,7 +1705,7 @@ mod virtual_dns_tcp_fallback_tests {
             let query_len = u16::from_be_bytes(prefix) as usize;
             let mut received_query = vec![0_u8; query_len];
             resolver.read_exact(&mut received_query).await.unwrap();
-            assert_eq!(received_query, query);
+            assert_eq!(received_query, expected_query);
 
             let response_len = u16::try_from(expected_response.len()).unwrap();
             resolver.write_all(&response_len.to_be_bytes()).await.unwrap();
