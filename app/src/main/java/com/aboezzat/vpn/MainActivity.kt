@@ -969,7 +969,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         OutlinedButton(modifier = Modifier.weight(1f), onClick = {
                             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("AboEzzat VPN diagnostics", diagnosticsText))
-                            notice = tx("Diagnostic report copied")
+                            notice = "Diagnostic report copied"
                         }) { Text(tx("Copy report")) }
                         OutlinedButton(modifier = Modifier.weight(1f), onClick = { ConnectionDiagnostics.clear(context); diagnosticsText = "" }) { Text(tx("Clear")) }
                     }
