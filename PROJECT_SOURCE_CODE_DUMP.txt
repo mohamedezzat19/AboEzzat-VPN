@@ -6725,3 +6725,755 @@ class ProxyProfileTest {
     @Test fun acceptsCompleteCredentials() { assertNull(profile(username = "user", password = "secret").validate()) }
 }
 
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/proxy/ProxyTcpRelayTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/proxy
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3352 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.BufferedInputStream
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ProxyTcpRelayTest {
+    @Test
+    fun opensProxyTunnelRelaysDataAndReleasesManagedSocket() {
+        val proxyServer = ServerSocket(0)
+        val clientServer = ServerSocket(0)
+        val proxyAccepted = CountDownLatch(1)
+        val proxyWorker = thread(start = true) {
+            proxyServer.accept().use { proxy ->
+                proxy.soTimeout = 3000
+                val input = BufferedInputStream(proxy.getInputStream())
+                readHeaders(input)
+                proxy.getOutputStream().write(
+                    "HTTP/1.1 200 Connection established\r\n\r\n".toByteArray(Charsets.US_ASCII)
+                )
+                proxy.getOutputStream().flush()
+                proxyAccepted.countDown()
+                val buffer = ByteArray(1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    proxy.getOutputStream().write(buffer, 0, count)
+                    proxy.getOutputStream().flush()
+                }
+            }
+        }
+        val clientPeer = Socket("127.0.0.1", clientServer.localPort)
+        val relayClient = clientServer.accept()
+        val manager = ProxyTcpTunnelManager(2)
+        val executor = Executors.newFixedThreadPool(2)
+        val relay = ProxyTcpRelay(manager, executor)
+
+        try {
+            val session = relay.open(
+                clientSocket = relayClient,
+                profile = ProxyProfile(
+                    "local-test",
+                    "127.0.0.1",
+                    proxyServer.localPort,
+                    ProxyProtocol.HTTP_CONNECT
+                ),
+                destinationHost = "example.com",
+                destinationPort = 443
+            )
+            assertTrue(proxyAccepted.await(2, TimeUnit.SECONDS))
+            clientPeer.getOutputStream().write("hello".toByteArray())
+            val echoed = clientPeer.getInputStream().readNBytes(5)
+            assertEquals("hello", String(echoed))
+            clientPeer.close()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+            while (manager.activeCount != 0 && System.nanoTime() < deadline) {
+                Thread.sleep(10)
+            }
+            assertEquals(0, manager.activeCount)
+            assertTrue(session.isClosed)
+        } finally {
+            clientPeer.close()
+            manager.shutdown()
+            executor.shutdownNow()
+            proxyServer.close()
+            clientServer.close()
+            proxyWorker.join(1000)
+        }
+    }
+
+    private fun readHeaders(input: BufferedInputStream) {
+        var matched = 0
+        val ending = "\r\n\r\n"
+        while (matched < ending.length) {
+            val value = input.read()
+            if (value < 0) throw AssertionError("Incomplete HTTP CONNECT request")
+            val char = value.toChar()
+            matched = if (char == ending[matched]) matched + 1
+            else if (char == '\r') 1 else 0
+        }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/proxy/ProxyTcpTunnelManagerTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/proxy
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3460 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.IOException
+import java.net.ServerSocket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ProxyTcpTunnelManagerTest {
+    @Test
+    fun enforcesLimitAndReleasesTunnelResources() {
+        val server = ServerSocket(0)
+        val accepted = CountDownLatch(1)
+        val worker = thread(start = true) {
+            server.accept().use { peer ->
+                peer.soTimeout = 3000
+                val input = BufferedInputStream(peer.getInputStream())
+                readHttpHeaders(input)
+                val output = BufferedOutputStream(peer.getOutputStream())
+                output.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                output.flush()
+                accepted.countDown()
+                try {
+                    while (input.read() >= 0) Unit
+                } catch (_: IOException) {
+                    // Client closed the managed tunnel.
+                }
+            }
+        }
+        val manager = ProxyTcpTunnelManager(maxConcurrentTunnels = 1)
+        try {
+            val socket = manager.openTunnel(
+                ProxyProfile("test", "127.0.0.1", server.localPort, ProxyProtocol.HTTP_CONNECT),
+                "example.com",
+                443
+            )
+            assertTrue(accepted.await(2, TimeUnit.SECONDS))
+            assertEquals(1, manager.activeCount)
+
+            try {
+                manager.openTunnel(
+                    ProxyProfile("test", "127.0.0.1", server.localPort, ProxyProtocol.HTTP_CONNECT),
+                    "example.org",
+                    443
+                )
+                throw AssertionError("Expected concurrent tunnel limit to reject second tunnel")
+            } catch (expected: IOException) {
+                assertTrue(expected.message.orEmpty().contains("limit"))
+            }
+
+            assertTrue(manager.release(socket))
+            assertTrue(socket.isClosed)
+            assertEquals(0, manager.activeCount)
+            assertFalse(manager.release(socket))
+        } finally {
+            manager.shutdown()
+            server.close()
+            worker.join(1000)
+        }
+    }
+
+    @Test
+    fun shutdownRejectsNewTunnels() {
+        val manager = ProxyTcpTunnelManager()
+        manager.shutdown()
+        assertTrue(manager.isShutdown)
+        try {
+            manager.openTunnel(
+                ProxyProfile("test", "127.0.0.1", 1, ProxyProtocol.HTTP_CONNECT),
+                "example.com",
+                443
+            )
+            throw AssertionError("Expected shutdown manager to reject new tunnel")
+        } catch (expected: IOException) {
+            assertTrue(expected.message.orEmpty().contains("shut down"))
+        }
+    }
+
+    private fun readHttpHeaders(input: BufferedInputStream) {
+        var matched = 0
+        val ending = "\r\n\r\n"
+        while (matched < ending.length) {
+            val value = input.read()
+            if (value < 0) throw AssertionError("Incomplete HTTP CONNECT request")
+            val char = value.toChar()
+            matched = if (char == ending[matched]) matched + 1
+            else if (char == '\r') 1 else 0
+        }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/proxy/ProxyTcpTunnelTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/proxy
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 8528 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.net.ServerSocket
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.concurrent.thread
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ProxyTcpTunnelTest {
+    @Test
+    fun opensHttpConnectTunnelAndReturnsUsableSocket() {
+        val server = ServerSocket(0)
+        val requestValid = AtomicBoolean(false)
+        val serverFailure = AtomicReference<Throwable?>(null)
+        val worker = thread(start = true) {
+            try {
+                server.accept().use { peer ->
+                    peer.soTimeout = 3000
+                    val input = BufferedInputStream(peer.getInputStream())
+                    val request = readHttpHeaders(input)
+                    requestValid.set(
+                        request.startsWith("CONNECT example.com:443 HTTP/1.1\r\n") &&
+                            request.contains("Proxy-Authorization: Basic dXNlcjpwYXNz\r\n")
+                    )
+                    val output = BufferedOutputStream(peer.getOutputStream())
+                    output.write("HTTP/1.1 200 Connection established\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                    output.flush()
+                    val payload = ByteArray(4)
+                    input.readFully(payload)
+                    assertEquals("ping", String(payload, Charsets.US_ASCII))
+                    output.write("pong".toByteArray(Charsets.US_ASCII))
+                    output.flush()
+                }
+            } catch (error: Throwable) {
+                serverFailure.set(error)
+            }
+        }
+
+        try {
+            val protectedBeforeConnect = AtomicBoolean(false)
+            val tunnel = ProxyTcpTunnel.open(
+                profile = ProxyProfile(
+                    "HTTP test", "127.0.0.1", server.localPort, ProxyProtocol.HTTP_CONNECT,
+                    username = "user", password = "pass"
+                ),
+                destinationHost = "example.com",
+                destinationPort = 443,
+                protectSocket = { socket ->
+                    protectedBeforeConnect.set(!socket.isConnected)
+                    true
+                }
+            )
+            tunnel.use { socket ->
+                assertEquals("A live tunnel must not retain the handshake read timeout", 0, socket.soTimeout)
+                socket.getOutputStream().write("ping".toByteArray(Charsets.US_ASCII))
+                val response = ByteArray(4)
+                socket.getInputStream().readFully(response)
+                assertEquals("pong", String(response, Charsets.US_ASCII))
+            }
+            worker.join(3000)
+            assertTrue("protect() callback must run before connect", protectedBeforeConnect.get())
+            assertTrue("HTTP CONNECT request must include destination and auth", requestValid.get())
+            serverFailure.get()?.let { throw AssertionError("Mock HTTP proxy failed", it) }
+        } finally {
+            server.close()
+            worker.join(1000)
+        }
+    }
+
+    @Test
+    fun opensSocks5AuthenticatedRemoteDnsTunnel() {
+        val server = ServerSocket(0)
+        val requestValid = AtomicBoolean(false)
+        val serverFailure = AtomicReference<Throwable?>(null)
+        val worker = thread(start = true) {
+            try {
+                server.accept().use { peer ->
+                    peer.soTimeout = 3000
+                    val input = BufferedInputStream(peer.getInputStream())
+                    val output = BufferedOutputStream(peer.getOutputStream())
+
+                    assertEquals(listOf(5, 2, 0, 2), readExactly(input, 4).map { it.toInt() and 0xff })
+                    output.write(byteArrayOf(5, 2))
+                    output.flush()
+
+                    val authVersion = input.read()
+                    val usernameLength = input.read()
+                    val username = String(readExactly(input, usernameLength), Charsets.UTF_8)
+                    val passwordLength = input.read()
+                    val password = String(readExactly(input, passwordLength), Charsets.UTF_8)
+                    assertTrue(authVersion == 1 && username == "user" && password == "pass")
+                    output.write(byteArrayOf(1, 0))
+                    output.flush()
+
+                    val header = readExactly(input, 4)
+                    assertEquals(5, header[0].toInt() and 0xff)
+                    assertEquals(1, header[1].toInt() and 0xff)
+                    assertEquals(3, header[3].toInt() and 0xff)
+                    val hostLength = input.read()
+                    val host = String(readExactly(input, hostLength), Charsets.US_ASCII)
+                    val port = readExactly(input, 2).map { it.toInt() and 0xff }
+                    requestValid.set(host == "example.com" && port == listOf(1, 187))
+
+                    output.write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, 0, 80))
+                    output.flush()
+                    val payload = ByteArray(4)
+                    input.readFully(payload)
+                    assertEquals("ping", String(payload, Charsets.US_ASCII))
+                    output.write("pong".toByteArray(Charsets.US_ASCII))
+                    output.flush()
+                }
+            } catch (error: Throwable) {
+                serverFailure.set(error)
+            }
+        }
+
+        try {
+            val tunnel = ProxyTcpTunnel.open(
+                profile = ProxyProfile(
+                    "SOCKS test", "127.0.0.1", server.localPort, ProxyProtocol.SOCKS5,
+                    username = "user", password = "pass", remoteDns = true
+                ),
+                destinationHost = "example.com",
+                destinationPort = 443
+            )
+            tunnel.use { socket ->
+                socket.getOutputStream().write("ping".toByteArray(Charsets.US_ASCII))
+                val response = ByteArray(4)
+                socket.getInputStream().readFully(response)
+                assertEquals("pong", String(response, Charsets.US_ASCII))
+            }
+            worker.join(3000)
+            assertTrue("SOCKS5 CONNECT must use remote hostname and port", requestValid.get())
+            serverFailure.get()?.let { throw AssertionError("Mock SOCKS5 proxy failed", it) }
+        } finally {
+            server.close()
+            worker.join(1000)
+        }
+    }
+
+    @Test
+    fun closesSocketWhenProtectionIsRejected() {
+        val server = ServerSocket(0)
+        server.soTimeout = 250
+        try {
+            try {
+                ProxyTcpTunnel.open(
+                    ProxyProfile("HTTP test", "127.0.0.1", server.localPort, ProxyProtocol.HTTP_CONNECT),
+                    "example.com",
+                    443,
+                    protectSocket = { false }
+                )
+                throw AssertionError("Expected protection failure")
+            } catch (expected: java.io.IOException) {
+                assertTrue(expected.message.orEmpty().contains("protect"))
+            }
+            try {
+                server.accept().close()
+                throw AssertionError("Proxy socket must not connect if protect() fails")
+            } catch (_: java.net.SocketTimeoutException) {
+                // Expected: connection was rejected before connect().
+            }
+        } finally {
+            server.close()
+        }
+    }
+
+    private fun readHttpHeaders(input: BufferedInputStream): String {
+        val result = StringBuilder()
+        var matched = 0
+        val ending = "\r\n\r\n"
+        while (matched < ending.length) {
+            val value = input.read()
+            if (value < 0) throw AssertionError("Incomplete HTTP CONNECT request")
+            val char = value.toChar()
+            result.append(char)
+            matched = if (char == ending[matched]) matched + 1
+            else if (char == '\r') 1 else 0
+        }
+        return result.toString()
+    }
+
+    private fun readExactly(input: BufferedInputStream, count: Int): ByteArray {
+        val bytes = ByteArray(count)
+        input.readFully(bytes)
+        return bytes
+    }
+
+    private fun java.io.InputStream.readFully(bytes: ByteArray) {
+        var offset = 0
+        while (offset < bytes.size) {
+            val count = read(bytes, offset, bytes.size - offset)
+            if (count < 0) throw AssertionError("Unexpected end of mock proxy stream")
+            offset += count
+        }
+    }
+
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/proxy/ProxyTestRequestParserTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/proxy
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 1848 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
+import org.junit.Test
+
+class ProxyTestRequestParserTest {
+    private fun parse(
+        name: String? = "Phone proxy",
+        host: String? = "192.168.1.10",
+        port: Int = 8080,
+        protocol: String? = ProxyProtocol.HTTP_CONNECT.name,
+        username: String? = null,
+        password: String? = null,
+        remoteDns: Boolean = true
+    ) = ProxyTestRequestParser.parse(name, host, port, protocol, username, password, remoteDns)
+
+    @Test fun parsesValidHttpProfile() {
+        val profile = parse()
+        assertNotNull(profile)
+        assertEquals(ProxyProtocol.HTTP_CONNECT, profile?.protocol)
+    }
+
+    @Test fun defaultsMissingProtocolToHttpConnect() {
+        assertEquals(ProxyProtocol.HTTP_CONNECT, parse(protocol = null)?.protocol)
+    }
+
+    @Test fun parsesSocks5AndPreservesOptions() {
+        val profile = parse(
+            protocol = ProxyProtocol.SOCKS5.name,
+            username = "user",
+            password = "secret",
+            remoteDns = false
+        )
+        assertEquals(ProxyProtocol.SOCKS5, profile?.protocol)
+        assertEquals("user", profile?.username)
+        assertEquals("secret", profile?.password)
+        assertEquals(false, profile?.remoteDns)
+    }
+
+    @Test fun rejectsUnknownProtocol() {
+        assertNull(parse(protocol = "SOCKS4"))
+    }
+
+    @Test fun rejectsMissingNameOrHost() {
+        assertNull(parse(name = null))
+        assertNull(parse(host = null))
+    }
+
+    @Test fun rejectsInvalidPort() {
+        assertNull(parse(port = 0))
+        assertNull(parse(port = 65536))
+    }
+
+    @Test fun rejectsIncompleteCredentials() {
+        assertNull(parse(username = "user"))
+        assertNull(parse(password = "secret"))
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/proxy/Socks5UdpAssociateTesterTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/proxy
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3614 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import kotlin.concurrent.thread
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class Socks5UdpAssociateTesterTest {
+    @Test
+    fun verifiesUdpDatagramRoundTripThroughRelay() {
+        DatagramSocket(0, InetAddress.getByName("127.0.0.1")).use { relay ->
+            relay.soTimeout = 3000
+            ServerSocket(0).use { server ->
+                val worker = thread(start = true) {
+                    server.accept().use { socket ->
+                        val input = BufferedInputStream(socket.getInputStream())
+                        val output = BufferedOutputStream(socket.getOutputStream())
+                        assertEquals(listOf(5, 1, 0), readExactly(input, 3).map { it.toInt() and 0xff })
+                        output.write(byteArrayOf(5, 0))
+                        output.flush()
+
+                        assertEquals(
+                            listOf(5, 3, 0, 1, 0, 0, 0, 0, 0, 0),
+                            readExactly(input, 10).map { it.toInt() and 0xff }
+                        )
+                        val address = byteArrayOf(127, 0, 0, 1)
+                        val port = relay.localPort
+                        output.write(byteArrayOf(5, 0, 0, 1) + address +
+                            byteArrayOf((port ushr 8).toByte(), port.toByte()))
+                        output.flush()
+
+                        val requestBytes = ByteArray(2048)
+                        val request = DatagramPacket(requestBytes, requestBytes.size)
+                        relay.receive(request)
+                        val packet = request.data.copyOf(request.length)
+                        // SOCKS UDP header is 10 bytes for an IPv4 destination.
+                        assertTrue(packet.size > 22)
+                        val dnsQuery = packet.copyOfRange(10, packet.size)
+                        dnsQuery[2] = (dnsQuery[2].toInt() or 0x80).toByte()
+                        val response = byteArrayOf(0, 0, 0, 1, 1, 1, 1, 1, 0, 53) + dnsQuery
+                        relay.send(DatagramPacket(response, response.size, request.address, request.port))
+                    }
+                }
+
+                val result = Socks5UdpAssociateTester.test(
+                    ProxyProfile("UDP test", "127.0.0.1", server.localPort, ProxyProtocol.SOCKS5)
+                )
+                worker.join(4000)
+                assertTrue(result.message, result.supported)
+                assertEquals("127.0.0.1", result.relayAddress)
+                assertEquals(relay.localPort, result.relayPort)
+                assertTrue(result.message.contains("round-trip verified"))
+            }
+        }
+    }
+
+    @Test
+    fun clearlyReportsHttpConnectCannotCarryUdp() {
+        val result = Socks5UdpAssociateTester.test(
+            ProxyProfile("HTTP", "127.0.0.1", 8080, ProxyProtocol.HTTP_CONNECT)
+        )
+        assertFalse(result.supported)
+        assertTrue(result.message.contains("TCP only"))
+    }
+
+    private fun readExactly(input: BufferedInputStream, count: Int): ByteArray {
+        val result = ByteArray(count)
+        for (index in 0 until count) {
+            val value = input.read()
+            if (value < 0) throw AssertionError("Unexpected end of SOCKS5 request")
+            result[index] = value.toByte()
+        }
+        return result
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/proxy/TcpStreamRelayTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/proxy
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 2712 بايت
+==============================================================================
+package com.aboezzat.vpn.proxy
+
+import java.net.ServerSocket
+import java.net.Socket
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.concurrent.thread
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class TcpStreamRelayTest {
+    @Test
+    fun relaysBytesInBothDirectionsAndClosesAfterBothHalfCloses() {
+        val clientListener = ServerSocket(0)
+        val upstreamListener = ServerSocket(0)
+        val pool = Executors.newFixedThreadPool(2)
+        val closed = CountDownLatch(1)
+        val clientPeer = Socket("127.0.0.1", clientListener.localPort)
+        val clientRelay = clientListener.accept()
+        val upstreamPeer = Socket("127.0.0.1", upstreamListener.localPort)
+        val upstreamRelay = upstreamListener.accept()
+        val session = TcpStreamRelay.start(clientRelay, upstreamRelay, pool) { closed.countDown() }
+
+        try {
+            clientPeer.getOutputStream().write("client-to-upstream".toByteArray())
+            clientPeer.shutdownOutput()
+            val upstreamReceived = upstreamPeer.getInputStream().readNBytes(19)
+            assertEquals("client-to-upstream", String(upstreamReceived))
+
+            upstreamPeer.getOutputStream().write("upstream-to-client".toByteArray())
+            upstreamPeer.shutdownOutput()
+            val clientReceived = clientPeer.getInputStream().readNBytes(19)
+            assertEquals("upstream-to-client", String(clientReceived))
+
+            assertTrue(closed.await(3, TimeUnit.SECONDS))
+            assertTrue(session.isClosed)
+        } finally {
+            session.close()
+            clientPeer.close()
+            upstreamPeer.close()
+            clientListener.close()
+            upstreamListener.close()
+            pool.shutdownNow()
+            pool.awaitTermination(2, TimeUnit.SECONDS)
+        }
+    }
+
+    @Test
+    fun manualCloseClosesBothSockets() {
+        val listenerA = ServerSocket(0)
+        val listenerB = ServerSocket(0)
+        val pool = Executors.newFixedThreadPool(2)
+        val aPeer = Socket("127.0.0.1", listenerA.localPort)
+        val aRelay = listenerA.accept()
+        val bPeer = Socket("127.0.0.1", listenerB.localPort)
+        val bRelay = listenerB.accept()
+        val session = TcpStreamRelay.start(aRelay, bRelay, pool)
+        try {
+            session.close()
+            assertTrue(session.isClosed)
+            assertTrue(aRelay.isClosed)
+            assertTrue(bRelay.isClosed)
+        } finally {
+            aPeer.close()
+            bPeer.close()
+            listenerA.close()
+            listenerB.close()
+            pool.shutdownNow()
+        }
+    }
+}
+
+
+
+==============================================================================
+اسم الملف: app/src/test/java/com/aboezzat/vpn/vpn/ConnectionRouteDecisionEngineTest.kt
+المجلد: app/src/test/java/com/aboezzat/vpn/vpn
+وظيفة الملف: اختبارات وحدات لهذا الجزء من المشروع.
+الحجم الأصلي: 3213 بايت
+==============================================================================
+package com.aboezzat.vpn.vpn
+
+import com.aboezzat.vpn.core.AppRoutePolicyResolver
+import com.aboezzat.vpn.core.AppRouteResolutionReason
+import com.aboezzat.vpn.core.RouteMode
+import com.aboezzat.vpn.core.UidPackageLookup
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ConnectionRouteDecisionEngineTest {
+    private val tuple = NetworkConnectionTuple(
+        IpTransportProtocol.TCP,
+        InetSocketAddress(InetAddress.getByName("10.0.0.2"), 43120),
+        InetSocketAddress(InetAddress.getByName("203.0.113.10"), 443)
+    )
+
+    @Test
+    fun resolvesUidThenAppliesExplicitPackageRoute() {
+        val engine = ConnectionRouteDecisionEngine(
+            ConnectionOwnerUidProvider { ConnectionOwnerUidResult.Found(10123) },
+            AppRoutePolicyResolver(UidPackageLookup { listOf("com.example.app") })
+        )
+
+        val decision = engine.decide(
+            tuple,
+            mapOf("com.example.app" to RouteMode.PROXY_ONLY)
+        )
+
+        assertTrue(decision is ConnectionRouteDecision.Resolved)
+        decision as ConnectionRouteDecision.Resolved
+        assertEquals(10123, decision.ownerUid)
+        assertEquals(RouteMode.PROXY_ONLY, decision.policy.mode)
+        assertEquals(AppRouteResolutionReason.EXPLICIT_POLICY, decision.policy.reason)
+    }
+
+    @Test
+    fun missingConnectionOwnerIsNotGuessedOrRouted() {
+        val engine = ConnectionRouteDecisionEngine(
+            ConnectionOwnerUidProvider { ConnectionOwnerUidResult.ConnectionNotFound },
+            AppRoutePolicyResolver(UidPackageLookup { listOf("com.example.app") })
+        )
+
+        val decision = engine.decide(
+            tuple,
+            mapOf("com.example.app" to RouteMode.DIRECT)
+        )
+
+        assertTrue(decision is ConnectionRouteDecision.Unresolved)
+        decision as ConnectionRouteDecision.Unresolved
+        assertEquals(ConnectionOwnerUidResult.ConnectionNotFound, decision.ownerLookup)
+    }
+
+    @Test
+    fun unsupportedAndroidVersionRemainsExplicitlyUnsupported() {
+        val engine = ConnectionRouteDecisionEngine(
+            ConnectionOwnerUidProvider { ConnectionOwnerUidResult.UnsupportedAndroidVersion },
+            AppRoutePolicyResolver(UidPackageLookup { emptyList() })
+        )
+
+        val decision = engine.decide(tuple, emptyMap())
+
+        assertTrue(decision is ConnectionRouteDecision.Unresolved)
+        decision as ConnectionRouteDecision.Unresolved
+        assertEquals(
+            ConnectionOwnerUidResult.UnsupportedAndroidVersion,
+            decision.ownerLookup
+        )
+    }
+
+    @Test
+    fun invalidUidReturnedByProviderIsRejected() {
+        val engine = ConnectionRouteDecisionEngine(
+            ConnectionOwnerUidProvider { ConnectionOwnerUidResult.Found(-1) },
+            AppRoutePolicyResolver(UidPackageLookup { listOf("com.example.app") })
+        )
+
+        val decision = engine.decide(tuple, emptyMap())
+
+        assertTrue(decision is ConnectionRouteDecision.Unresolved)
+        decision as ConnectionRouteDecision.Unresolved
+        assertEquals(ConnectionOwnerUidResult.ConnectionNotFound, decision.ownerLookup)
+    }
+}
+
