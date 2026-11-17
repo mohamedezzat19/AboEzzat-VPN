@@ -202,7 +202,9 @@ impl VirtualDns {
             }
             next_addr = Self::increment_ip(next_addr)?;
             if next_addr == broadcast_addr {
-                next_addr = network_addr;
+                // Wrap to the first usable address, never to the reserved
+                // subnet address.
+                next_addr = Self::increment_ip(network_addr)?;
             }
             if next_addr == started_at {
                 return Err("Virtual IP space for DNS exhausted".into());
@@ -228,6 +230,22 @@ mod tests {
 
     fn dns(pool: &str) -> VirtualDns {
         VirtualDns::new(IpCidr::from_str(pool).unwrap())
+    }
+
+    #[test]
+    fn exhausted_pool_never_wraps_into_reserved_subnet_address() {
+        let mut dns = dns("198.18.0.0/29");
+
+        for index in 1..=6 {
+            let name = format!("host-{index}.example");
+            let (_, _, ip) =
+                dns.generate_query(&query_wire(&name, RecordType::A)).unwrap();
+            assert_eq!(ip, format!("198.18.0.{index}").parse::<IpAddr>().unwrap());
+        }
+
+        assert!(dns
+            .generate_query(&query_wire("seventh.example", RecordType::A))
+            .is_err());
     }
 
     #[test]
