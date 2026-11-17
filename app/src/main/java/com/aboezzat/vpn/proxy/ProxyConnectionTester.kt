@@ -6,6 +6,8 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -38,18 +40,47 @@ object ProxyConnectionTester {
                     ProxyProtocol.HTTP_CONNECT -> testHttpConnect(profile, input, output)
                     ProxyProtocol.SOCKS5 -> testSocks5(profile, input, output)
                 }
+
+                // A successful proxy handshake is not enough: verify destination TLS
+                // and read an actual HTTP response through the established tunnel.
+                val ssl = (SSLSocketFactory.getDefault() as SSLSocketFactory)
+                    .createSocket(socket, TEST_HOST, TEST_PORT, false) as SSLSocket
+                ssl.use { tls ->
+                    tls.soTimeout = READ_TIMEOUT_MS
+                    tls.sslParameters = tls.sslParameters.apply {
+                        endpointIdentificationAlgorithm = "HTTPS"
+                    }
+                    tls.startHandshake()
+                    val request = "GET / HTTP/1.1\\r\\n" +
+                        "Host: $TEST_HOST\\r\\n" +
+                        "User-Agent: AboEzzat-VPN-Diagnostic/1.0\\r\\n" +
+                        "Connection: close\\r\\n\\r\\n"
+                    tls.outputStream.write(request.toByteArray(StandardCharsets.US_ASCII))
+                    tls.outputStream.flush()
+                    val response = BufferedInputStream(tls.inputStream)
+                    val headers = readHttpHeaders(response)
+                    val status = headers.lineSequence().firstOrNull().orEmpty()
+                    if (!status.contains(" 200 ")) {
+                        throw IOException("TLS connected, but destination returned: $status")
+                    }
+                    if (response.read() < 0) {
+                        throw IOException("TLS connected, but no response body data was received.")
+                    }
+                }
             }
             ProxyTestResult(
                 true,
-                "Proxy CONNECT handshake succeeded. Destination TLS was not tested.",
+                "Proxy CONNECT, destination TLS and HTTPS data transfer succeeded.",
                 elapsedMs()
             )
+        } catch (e: javax.net.ssl.SSLException) {
+            ProxyTestResult(false, "Proxy CONNECT succeeded or started, but destination TLS failed: ${e.message?.take(100) ?: "TLS error"}", elapsedMs())
         } catch (e: java.net.SocketTimeoutException) {
-            ProxyTestResult(false, "Connection timed out. Check server IP, port and network.", elapsedMs())
+            ProxyTestResult(false, "Timed out during proxy connection, TLS or HTTPS data transfer.", elapsedMs())
         } catch (e: java.net.UnknownHostException) {
-            ProxyTestResult(false, "Could not resolve the proxy server address.", elapsedMs())
+            ProxyTestResult(false, "Could not resolve the proxy server or destination address.", elapsedMs())
         } catch (e: Exception) {
-            ProxyTestResult(false, e.message?.take(140) ?: "Proxy handshake failed.", elapsedMs())
+            ProxyTestResult(false, e.message?.take(140) ?: "Proxy HTTPS test failed.", elapsedMs())
         }
     }
 
