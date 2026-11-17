@@ -14,18 +14,20 @@ pub unsafe extern "C" fn tun2proxy_set_traffic_status_callback(
     callback: Option<unsafe extern "C" fn(*const TrafficStatus, *mut c_void)>,
     ctx: *mut c_void,
 ) {
-    if let Ok(mut cb) = TRAFFIC_STATUS_CALLBACK.lock() {
+    let callback_registered = if let Ok(mut cb) = TRAFFIC_STATUS_CALLBACK.lock() {
         *cb = Some(TrafficStatusCallback(callback, ctx));
+        true
     } else {
         log::error!("set traffic status callback failed");
-    }
+        false
+    };
     if send_interval_secs > 0 {
         SEND_INTERVAL_SECS.store(send_interval_secs as u64, std::sync::atomic::Ordering::Relaxed);
     }
     TRAFFIC_TX.store(0, Ordering::Relaxed);
     TRAFFIC_RX.store(0, Ordering::Relaxed);
     LAST_REPORT_SECONDS.store(TRAFFIC_CLOCK.elapsed().as_secs(), Ordering::Relaxed);
-    CALLBACK_ACTIVE.store(true, Ordering::Release);
+    CALLBACK_ACTIVE.store(callback_registered, Ordering::Release);
 }
 
 #[repr(C)]
