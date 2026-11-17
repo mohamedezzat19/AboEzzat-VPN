@@ -514,32 +514,41 @@ class AboEzzatVpnService : VpnService() {
         )
     }
 
-    /** Protect outbound diagnostic sockets before connect/send. */
+    /**
+     * Snapshot of the VPN state at the exact moment socket protection is attempted.
+     * This adds context to a failure without assuming its cause.
+     */
+    private fun socketProtectionContext(): String {
+        val vpnPermissionGranted = runCatching { VpnService.prepare(this) == null }.getOrDefault(false)
+        val active = ::tunnelRunner.isInitialized && tunnelRunner.isActive()
+        return "vpnPermissionGranted=$vpnPermissionGranted, tunnelActive=$active, " +
+            "nativeBridgeBound=$nativeBridgeBound, serviceDestroyed=$destroyed, " +
+            "sdk=${Build.VERSION.SDK_INT}, thread=${Thread.currentThread().name}"
+    }
+
+    /** Protect outbound diagnostic TCP sockets before connect. */
     fun protectUpstreamSocket(socket: Socket): Boolean {
         val allowed = protect(socket)
         if (!allowed) {
-            ConnectionDiagnostics.add(this, "VpnService.protect(DatagramSocket) returned false; closed=" + socket.isClosed + ", bound=" + socket.isBound + ", thread=" + Thread.currentThread().name)
-            ConnectionDiagnostics.add(this, "VpnService.protect(Socket) returned false; closed=" + socket.isClosed + ", connected=" + socket.isConnected + ", bound=" + socket.isBound + ", thread=" + Thread.currentThread().name)
-            Log.e(
-                SOCKET_PROTECT_LOG_TAG,
-                "VpnService.protect(Socket) returned false: closed=${socket.isClosed}, " +
-                    "connected=${socket.isConnected}, bound=${socket.isBound}, " +
-                    "localPort=${runCatching { socket.localPort }.getOrDefault(-1)}, " +
-                    "thread=${Thread.currentThread().name}"
-            )
+            val detail = "VpnService.protect(Socket) returned false; closed=${socket.isClosed}, " +
+                "connected=${socket.isConnected}, bound=${socket.isBound}, " +
+                "localPort=${runCatching { socket.localPort }.getOrDefault(-1)}, " +
+                socketProtectionContext()
+            ConnectionDiagnostics.add(this, detail)
+            Log.e(SOCKET_PROTECT_LOG_TAG, detail)
         }
         return allowed
     }
 
+    /** Protect outbound diagnostic UDP sockets before bind/send. */
     fun protectUpstreamDatagramSocket(socket: DatagramSocket): Boolean {
         val allowed = protect(socket)
         if (!allowed) {
-            Log.e(
-                SOCKET_PROTECT_LOG_TAG,
-                "VpnService.protect(DatagramSocket) returned false: closed=${socket.isClosed}, " +
-                    "bound=${socket.isBound}, localPort=${socket.localPort}, " +
-                    "thread=${Thread.currentThread().name}"
-            )
+            val detail = "VpnService.protect(DatagramSocket) returned false; closed=${socket.isClosed}, " +
+                "bound=${socket.isBound}, localPort=${runCatching { socket.localPort }.getOrDefault(-1)}, " +
+                socketProtectionContext()
+            ConnectionDiagnostics.add(this, detail)
+            Log.e(SOCKET_PROTECT_LOG_TAG, detail)
         }
         return allowed
     }
@@ -548,7 +557,12 @@ class AboEzzatVpnService : VpnService() {
     @androidx.annotation.Keep
     fun protectNativeSocket(fd: Int): Boolean {
         val allowed = NativeSocketProtection.protect(fd, ::protect)
-        if (!allowed) ConnectionDiagnostics.add(this, "Native VpnService.protect(fd) returned false; fd=" + fd)
+        if (!allowed) {
+            val detail = "Native VpnService.protect(fd) returned false; fd=$fd, " +
+                socketProtectionContext()
+            ConnectionDiagnostics.add(this, detail)
+            Log.e(SOCKET_PROTECT_LOG_TAG, detail)
+        }
         return allowed
     }
 
