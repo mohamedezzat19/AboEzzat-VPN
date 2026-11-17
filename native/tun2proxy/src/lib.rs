@@ -18,6 +18,7 @@ pub use socks5_impl::UserKey;
 #[cfg(feature = "udpgw")]
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 use std::{
+    ffi::CString,
     io::ErrorKind,
     net::{IpAddr, SocketAddr},
     os::fd::AsRawFd,
@@ -72,6 +73,22 @@ const DNS_PORT: u16 = 53;
 const PROXY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const PROXY_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const DNS_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(target_os = "android")]
+unsafe extern "C" {
+    fn abz_report_diagnostic(message: *const std::ffi::c_char);
+}
+
+/// Sends only stage, record type, timing and error class; never a queried hostname.
+fn report_native_diagnostic(message: &str) {
+    #[cfg(target_os = "android")]
+    if let Ok(message) = CString::new(message.replace('\0', " ")) {
+        unsafe { abz_report_diagnostic(message.as_ptr()); }
+    }
+    #[cfg(not(target_os = "android"))]
+    let _ = message;
+}
+
 
 /// Returns only the DNS record type for diagnostics; query names are never logged.
 fn dns_query_type_label(query: &[u8]) -> String {
@@ -802,12 +819,36 @@ async fn handle_virtual_dns_tcp_session(
                 let connect_started = Instant::now();
                 let mut dns_info = session_info;
                 dns_info.protocol = IpProtocol::Tcp;
-                let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
-                let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
+                let proxy_handler = match manager.new_proxy_handler(dns_info, None, false).await {
+                    Ok(handler) => handler,
+                    Err(error) => {
+                        report_native_diagnostic(&format!("DNS TCP failed: qtype={qtype}, stage=proxy_setup, error={error}"));
+                        return Err(error);
+                    }
+                };
+                let (mut server, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
+                    Ok(connection) => connection,
+                    Err(error) => {
+                        report_native_diagnostic(&format!("DNS TCP failed: qtype={qtype}, stage=proxy_connect_or_handshake, error={error}"));
+                        return Err(error);
+                    }
+                };
                 let proxy_connect_ms = connect_started.elapsed().as_millis();
                 let dns_started = Instant::now();
-                let response = tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, &query, ipv6_enabled)).await.map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out"))??;
-                log::info!("Virtual DNS-over-TCP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={}", dns_started.elapsed().as_millis());
+                let response = match tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, &query, ipv6_enabled)).await {
+                    Err(_) => {
+                        report_native_diagnostic(&format!("DNS TCP failed: qtype={qtype}, stage=resolver_timeout, timeout_ms={}", DNS_RESPONSE_TIMEOUT.as_millis()));
+                        return Err(std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out").into());
+                    }
+                    Ok(Err(error)) => {
+                        report_native_diagnostic(&format!("DNS TCP failed: qtype={qtype}, stage=resolver_exchange, error={error}"));
+                        return Err(error);
+                    }
+                    Ok(Ok(response)) => response,
+                };
+                let resolver_round_trip_ms = dns_started.elapsed().as_millis();
+                report_native_diagnostic(&format!("DNS TCP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={resolver_round_trip_ms}"));
+                log::info!("Virtual DNS-over-TCP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={resolver_round_trip_ms}");
                 response
             };
             let response_len = u16::try_from(response.len())?;
@@ -889,12 +930,36 @@ async fn handle_virtual_dns_session(
             let connect_started = Instant::now();
             let mut dns_info = session_info;
             dns_info.protocol = IpProtocol::Tcp;
-            let proxy_handler = manager.new_proxy_handler(dns_info, None, false).await?;
-            let (mut server, _) = open_proxy_connection(&socket_queue, proxy_handler).await?;
+            let proxy_handler = match manager.new_proxy_handler(dns_info, None, false).await {
+                Ok(handler) => handler,
+                Err(error) => {
+                    report_native_diagnostic(&format!("DNS UDP failed: qtype={qtype}, stage=proxy_setup, error={error}"));
+                    return Err(error);
+                }
+            };
+            let (mut server, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
+                Ok(connection) => connection,
+                Err(error) => {
+                    report_native_diagnostic(&format!("DNS UDP failed: qtype={qtype}, stage=proxy_connect_or_handshake, error={error}"));
+                    return Err(error);
+                }
+            };
             let proxy_connect_ms = connect_started.elapsed().as_millis();
             let dns_started = Instant::now();
-            let response = tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, query, ipv6_enabled)).await.map_err(|_| std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out"))??;
-            log::info!("Virtual DNS-over-UDP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={}", dns_started.elapsed().as_millis());
+            let response = match tokio::time::timeout(DNS_RESPONSE_TIMEOUT, forward_dns_query_over_tcp(&mut server, query, ipv6_enabled)).await {
+                Err(_) => {
+                    report_native_diagnostic(&format!("DNS UDP failed: qtype={qtype}, stage=resolver_timeout, timeout_ms={}", DNS_RESPONSE_TIMEOUT.as_millis()));
+                    return Err(std::io::Error::new(ErrorKind::TimedOut, "Upstream DNS response timed out").into());
+                }
+                Ok(Err(error)) => {
+                    report_native_diagnostic(&format!("DNS UDP failed: qtype={qtype}, stage=resolver_exchange, error={error}"));
+                    return Err(error);
+                }
+                Ok(Ok(response)) => response,
+            };
+            let resolver_round_trip_ms = dns_started.elapsed().as_millis();
+            report_native_diagnostic(&format!("DNS UDP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={resolver_round_trip_ms}"));
+            log::info!("Virtual DNS-over-UDP success: qtype={qtype}, proxy_connect_ms={proxy_connect_ms}, resolver_round_trip_ms={resolver_round_trip_ms}");
             response
         };
 
