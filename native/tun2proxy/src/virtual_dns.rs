@@ -204,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn virtual_dns_answers_only_the_address_family_of_its_pool() {
+    fn virtual_dns_answers_both_address_families_independent_of_configured_pool() {
         let mut ipv4_dns = dns("198.18.0.0/15");
         let (a_response, _, ipv4) = ipv4_dns.generate_query(&query_wire("example.org.", RecordType::A)).unwrap();
         assert!(ipv4.is_ipv4());
@@ -212,10 +212,11 @@ mod tests {
         assert_eq!(a_response.answers.len(), 1);
         assert!(matches!(a_response.answers[0].data, hickory_proto::rr::RData::A(_)));
 
-        let (aaaa_response, _, _) = ipv4_dns.generate_query(&query_wire("example.org.", RecordType::AAAA)).unwrap();
+        let (aaaa_response, _, ipv6) = ipv4_dns.generate_query(&query_wire("example.org.", RecordType::AAAA)).unwrap();
+        assert!(ipv6.is_ipv6());
         let aaaa_response = Message::from_vec(&aaaa_response).unwrap();
-        assert_eq!(aaaa_response.metadata.message_type, MessageType::Response);
-        assert!(aaaa_response.answers.is_empty());
+        assert_eq!(aaaa_response.answers.len(), 1);
+        assert!(matches!(aaaa_response.answers[0].data, hickory_proto::rr::RData::AAAA(_)));
 
         let mut ipv6_dns = dns("2001:db8::/120");
         let (aaaa_response, _, ipv6) = ipv6_dns.generate_query(&query_wire("example.org.", RecordType::AAAA)).unwrap();
@@ -224,9 +225,11 @@ mod tests {
         assert_eq!(aaaa_response.answers.len(), 1);
         assert!(matches!(aaaa_response.answers[0].data, hickory_proto::rr::RData::AAAA(_)));
 
-        let (a_response, _, _) = ipv6_dns.generate_query(&query_wire("example.org.", RecordType::A)).unwrap();
+        let (a_response, _, ipv4) = ipv6_dns.generate_query(&query_wire("example.org.", RecordType::A)).unwrap();
+        assert!(ipv4.is_ipv4());
         let a_response = Message::from_vec(&a_response).unwrap();
-        assert!(a_response.answers.is_empty());
+        assert_eq!(a_response.answers.len(), 1);
+        assert!(matches!(a_response.answers[0].data, hickory_proto::rr::RData::A(_)));
     }
 
     
