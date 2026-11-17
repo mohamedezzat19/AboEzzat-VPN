@@ -29,7 +29,7 @@ internal object Tun2ProxyCommandBuilder {
         val proxyUrl = "$scheme://$auth$host:${profile.port}"
 
         val dnsMode = if (profile.remoteDns) "virtual" else "over-tcp"
-        val arguments = listOf(
+        val arguments = mutableListOf(
             "tun2proxy-bin",
             "--tun-fd", tunFd.toString(),
             "--close-fd-on-drop", "false",
@@ -39,6 +39,15 @@ internal object Tun2ProxyCommandBuilder {
             "--mtu", mtu.toString(),
             "--verbosity", "info"
         )
+
+        // The native engine intentionally drops non-DNS UDP unless opted in.
+        // Android Proxy Server's SOCKS5 UDP ASSOCIATE path is tested separately,
+        // so enable real UDP forwarding for SOCKS5 profiles (QUIC, messaging,
+        // speed tests, etc.). HTTP CONNECT has no UDP transport and stays TCP-only.
+        if (profile.protocol == ProxyProtocol.SOCKS5) {
+            arguments += "--udp-enabled"
+        }
+
         return arguments.joinToString(" ") { shellQuote(it) }
     }
 
