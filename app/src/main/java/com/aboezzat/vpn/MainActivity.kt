@@ -198,7 +198,7 @@ private fun Dashboard(store: ProxyProfileStore) {
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var tunnelActive by remember { mutableStateOf(AboEzzatVpnService.isTunnelRunning()) }
     var tunnelConnecting by remember { mutableStateOf(false) }
-    var tunnelStatus by remember { mutableStateOf(if (tunnelActive) "Tunnel active" else "Not connected") }
+    var tunnelStatus by remember { mutableStateOf(if (tunnelActive) "Tunnel worker running · internet not verified" else "Not connected") }
     var proxyConnected by remember { mutableStateOf(false) }
     var proxyTesting by remember { mutableStateOf(false) }
     var proxyStatus by remember { mutableStateOf("Not tested") }
@@ -472,7 +472,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         ConnectionCircle(
-                            title = "Proxy",
+                            title = "Tunnel",
                             connected = tunnelActive,
                             connecting = tunnelConnecting,
                             onClick = {
@@ -485,7 +485,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                         )
                     }
                     Text(
-                        tx(if (tunnelConnecting) "Starting proxy tunnel…" else if (tunnelActive) "Proxy tunnel active" else "Proxy tunnel stopped"),
+                        tx(if (tunnelConnecting) "Starting proxy tunnel…" else if (tunnelActive) "Tunnel worker running · internet not verified" else "Proxy tunnel stopped"),
                         color = if (tunnelConnecting) Muted else if (tunnelActive) Color(0xFF54D98C) else Color(0xFFFF7777),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
@@ -910,7 +910,7 @@ private fun Dashboard(store: ProxyProfileStore) {
                     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
                         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(tx("Live tunnel state"), color = Color.White, fontWeight = FontWeight.Bold)
-                            Text(tx(if (tunnelActive) "Proxy tunnel active" else if (tunnelConnecting) "Starting proxy tunnel…" else "Proxy tunnel stopped"), color = if (tunnelActive) Accent else Muted, fontSize = 12.sp)
+                            Text(tx(if (tunnelActive) "Tunnel worker running · internet not verified" else if (tunnelConnecting) "Starting proxy tunnel…" else "Proxy tunnel stopped"), color = if (tunnelActive) Accent else Muted, fontSize = 12.sp)
                             Text(tx("Sent") + ": " + android.text.format.Formatter.formatShortFileSize(context, tunnelTxBytes) + "    " + tx("Received") + ": " + android.text.format.Formatter.formatShortFileSize(context, tunnelRxBytes), color = Color.White, fontSize = 12.sp)
                             Text(tx(tunnelStatus), color = Muted, fontSize = 11.sp)
                         }
@@ -1149,6 +1149,8 @@ private val arabicUi = mapOf(
     "Diagnostic report copied" to "تم نسخ تقرير التشخيص",
     "The report excludes proxy passwords and credentials. Reproduce the connection error, refresh, then copy the report and send it here." to "التقرير لا يحتوي على كلمات مرور أو بيانات اعتماد البروكسي. كرر خطأ الاتصال ثم حدّث التقرير وانسخه وأرسله هنا.",
     "Proxy tunnel active" to "نفق البروكسي نشط",
+    "Tunnel worker running · internet not verified" to "محرك النفق يعمل · لم يتم التحقق من الإنترنت بعد",
+    "Running" to "يعمل",
     "Proxy tunnel stopped" to "نفق البروكسي متوقف",
     "Sent" to "مرسل",
     "Received" to "مستقبل",
