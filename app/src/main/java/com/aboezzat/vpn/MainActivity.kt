@@ -186,6 +186,7 @@ private fun Dashboard(store: ProxyProfileStore) {
     var diagnosticsText by remember { mutableStateOf("") }
     var selectedRouteApp by remember { mutableStateOf<LaunchableApp?>(null) }
     var activeName by remember { mutableStateOf(store.activeProfileName()) }
+    var selectedProfileDetails by remember { mutableStateOf<ProxyProfile?>(null) }
     var editorProfile by remember { mutableStateOf<ProxyProfile?>(null) }
     var showEditor by remember { mutableStateOf(false) }
     var editorError by remember { mutableStateOf("") }
@@ -398,7 +399,7 @@ private fun Dashboard(store: ProxyProfileStore) {
         }
     }
 
-    fun connectSelectedProfile() {
+    fun connectSelectedProfile(targetProfile: ProxyProfile? = null) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
             !notificationPermissionRequested
@@ -406,7 +407,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
-        val profile = profiles.firstOrNull { it.name == activeName }
+        val profile = targetProfile ?: profiles.firstOrNull { it.name == activeName }
         if (profile == null) {
             notice = "Add and select a proxy profile first."
             return
@@ -671,7 +672,7 @@ private fun Dashboard(store: ProxyProfileStore) {
             profiles.forEach { profile ->
                 val selected = profile.name == activeName
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().clickable { selectedProfileDetails = profile },
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = Panel)
                 ) {
@@ -1081,6 +1082,55 @@ private fun Dashboard(store: ProxyProfileStore) {
                 }
             },
             confirmButton = { TextButton(onClick = { selectedRouteApp = null }) { Text(tx("Close"), color = Accent) } }
+        )
+    }
+
+    selectedProfileDetails?.let { profile ->
+        AlertDialog(
+            onDismissRequest = { selectedProfileDetails = null },
+            containerColor = Panel,
+            title = { Text(profile.name, color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(tx("PROFILE DETAILS"), color = Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(tx("Server") + ": ${profile.host}:${profile.port}", color = Color.White, fontSize = 13.sp)
+                    Text(tx("Protocol") + ": ${profile.protocol.name.replace("_", " ")}", color = Color.White, fontSize = 13.sp)
+                    Text(tx(if (profile.username.isNullOrEmpty()) "No authentication" else "Authentication saved securely"), color = Muted, fontSize = 12.sp)
+                    Text(tx(if (profile.remoteDns) "Remote DNS enabled" else "Remote DNS disabled"), color = Muted, fontSize = 12.sp)
+                    Text(tx(if (profile.name == activeName) "Active profile" else "Not active profile"), color = if (profile.name == activeName) Accent else Muted, fontSize = 12.sp)
+                    val result = testResults[profile.name]
+                    if (result != null) {
+                        Text(tx(if (result.success) "TCP test passed" else "TCP test failed"), color = if (result.success) Accent else Color(0xFFFF8B8B), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(result.message, color = Muted, fontSize = 11.sp)
+                        if (result.latencyMs > 0) Text("${result.latencyMs} ms", color = Muted, fontSize = 11.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    TextButton(onClick = {
+                        activeName = profile.name
+                        store.setActiveProfile(profile.name)
+                        selectedProfileDetails = null
+                        testProxyProfile(profile)
+                    }) { Text(tx("Test TCP"), color = Accent) }
+                    TextButton(onClick = {
+                        if (tunnelActive) sendTunnelCommand(AboEzzatVpnService.ACTION_STOP_TUNNEL)
+                        else connectSelectedProfile(profile)
+                    }) { Text(tx(if (tunnelActive) "Disconnect" else "Connect"), color = Accent) }
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        editorProfile = profile
+                        editorError = ""
+                        selectedProfileDetails = null
+                        showEditor = true
+                    }) { Text(tx("Edit"), color = Muted) }
+                    TextButton(onClick = { selectedProfileDetails = null }) { Text(tx("Close"), color = Muted) }
+                }
+            }
         )
     }
 
