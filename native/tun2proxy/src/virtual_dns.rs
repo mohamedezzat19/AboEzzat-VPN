@@ -22,20 +22,40 @@ struct NameCacheEntry {
 pub struct VirtualDns {
     trailing_dot: bool,
     lru_cache: LruCache<IpAddr, NameCacheEntry>,
-    name_to_ip: HashMap<String, IpAddr>,
-    network_addr: IpAddr,
-    broadcast_addr: IpAddr,
-    next_addr: IpAddr,
+    name_to_ip: HashMap<(String, bool), IpAddr>,
+    ipv4_network_addr: IpAddr,
+    ipv4_broadcast_addr: IpAddr,
+    next_ipv4_addr: IpAddr,
+    ipv6_network_addr: IpAddr,
+    ipv6_broadcast_addr: IpAddr,
+    next_ipv6_addr: IpAddr,
 }
 
 impl VirtualDns {
     pub fn new(ip_pool: IpCidr) -> Self {
+        // Keep the configured pool for its address family and provide a
+        // separate virtual pool for the other family. This lets Android
+        // clients receive both A and AAAA answers while preserving one
+        // hostname mapping across IPv4 and IPv6 connections.
+        let ipv4_pool = if ip_pool.first_address().is_ipv4() {
+            ip_pool.clone()
+        } else {
+            IpCidr::from_str("198.18.0.0/15").expect("valid IPv4 virtual DNS pool")
+        };
+        let ipv6_pool = if ip_pool.first_address().is_ipv6() {
+            ip_pool
+        } else {
+            IpCidr::from_str("fd77:ab0e:1::/112").expect("valid IPv6 virtual DNS pool")
+        };
         Self {
             trailing_dot: false,
-            next_addr: ip_pool.first_address(),
+            next_ipv4_addr: ipv4_pool.first_address(),
+            ipv4_network_addr: ipv4_pool.first_address(),
+            ipv4_broadcast_addr: ipv4_pool.last_address(),
+            next_ipv6_addr: ipv6_pool.first_address(),
+            ipv6_network_addr: ipv6_pool.first_address(),
+            ipv6_broadcast_addr: ipv6_pool.last_address(),
             name_to_ip: HashMap::default(),
-            network_addr: ip_pool.first_address(),
-            broadcast_addr: ip_pool.last_address(),
             lru_cache: LruCache::new_unbounded(),
         }
     }
@@ -46,7 +66,7 @@ impl VirtualDns {
         let mut message = dns::parse_data_to_dns_message(data, false)?;
         let qname = dns::extract_domain_from_dns_message(&message)?;
         let query_type = message.queries[0].query_type();
-        let ip = self.find_or_allocate_ip(qname.clone())?;
+        let ip = self.find_or_allocate_ip(qname.clone(), query_type == RecordType::AAAA)?;
         if matches!((query_type, ip.is_ipv4()), (RecordType::A, true) | (RecordType::AAAA, false)) {
             message = dns::build_dns_response(message, &qname, ip, 5)?;
         } else {
@@ -97,7 +117,7 @@ impl VirtualDns {
         self.lru_cache.get(addr).map(|entry| &entry.name)
     }
 
-    fn find_or_allocate_ip(&mut self, name: String) -> Result<IpAddr> {
+    fn find_or_allocate_ip(&mut self, name: String, ipv6: bool) -> Result<IpAddr> {
         // This function is a search and creation function.
         // Thus, it is sufficient to canonicalize the name here.
         let insert_name = if name.ends_with('.') && !self.trailing_dot {
@@ -119,7 +139,7 @@ impl VirtualDns {
             if now > entry.expiry {
                 let name = entry.name.clone();
                 self.lru_cache.remove(&ip.clone());
-                self.name_to_ip.remove(&name);
+                self.name_to_ip.remove(&(name, ip.is_ipv6()));
                 continue; // There might be another expired entry after this one.
             }
 
@@ -127,29 +147,39 @@ impl VirtualDns {
         }
 
         // Return the IP if it is stored inside our LRU cache.
-        if let Some(ip) = self.name_to_ip.get(&insert_name) {
+        let key = (insert_name.clone(), ipv6);
+        if let Some(ip) = self.name_to_ip.get(&key) {
             let ip = *ip;
             self.touch_ip(&ip);
             return Ok(ip);
         }
 
-        // Otherwise, store name and IP pair inside the LRU cache.
-        let started_at = self.next_addr;
+        // Allocate independently per address family. A and AAAA lookups
+        // for the same hostname must both resolve to the same hostname.
+        let (mut next_addr, network_addr, broadcast_addr) = if ipv6 {
+            (self.next_ipv6_addr, self.ipv6_network_addr, self.ipv6_broadcast_addr)
+        } else {
+            (self.next_ipv4_addr, self.ipv4_network_addr, self.ipv4_broadcast_addr)
+        };
+        let started_at = next_addr;
 
         loop {
-            if let RawEntryMut::Vacant(vacant) = self.lru_cache.raw_entry_mut().from_key(&self.next_addr) {
+            if let RawEntryMut::Vacant(vacant) = self.lru_cache.raw_entry_mut().from_key(&next_addr) {
                 let expiry = Instant::now() + Duration::from_secs(MAPPING_TIMEOUT);
-                let name0 = insert_name.clone();
-                vacant.insert(self.next_addr, NameCacheEntry { name: insert_name, expiry });
-                self.name_to_ip.insert(name0, self.next_addr);
-                return Ok(self.next_addr);
+                vacant.insert(next_addr, NameCacheEntry { name: insert_name, expiry });
+                self.name_to_ip.insert(key, next_addr);
+                if ipv6 {
+                    self.next_ipv6_addr = next_addr;
+                } else {
+                    self.next_ipv4_addr = next_addr;
+                }
+                return Ok(next_addr);
             }
-            self.next_addr = Self::increment_ip(self.next_addr)?;
-            if self.next_addr == self.broadcast_addr {
-                // Wrap around.
-                self.next_addr = self.network_addr;
+            next_addr = Self::increment_ip(next_addr)?;
+            if next_addr == broadcast_addr {
+                next_addr = network_addr;
             }
-            if self.next_addr == started_at {
+            if next_addr == started_at {
                 return Err("Virtual IP space for DNS exhausted".into());
             }
         }
@@ -199,6 +229,28 @@ mod tests {
         let (a_response, _, _) = ipv6_dns.generate_query(&query_wire("example.org.", RecordType::A)).unwrap();
         let a_response = Message::from_vec(&a_response).unwrap();
         assert!(a_response.answers.is_empty());
+    }
+
+    
+    #[test]
+    fn ipv4_pool_also_allocates_distinct_virtual_ipv6_for_aaaa() {
+        let mut dns = dns("198.18.0.0/15");
+        let (a_response, name_a, ipv4) =
+            dns.generate_query(&query_wire("dual.example.", RecordType::A)).unwrap();
+        let (aaaa_response, name_aaaa, ipv6) =
+            dns.generate_query(&query_wire("dual.example.", RecordType::AAAA)).unwrap();
+
+        assert_eq!(name_a, name_aaaa);
+        assert!(ipv4.is_ipv4());
+        assert!(ipv6.is_ipv6());
+        assert_ne!(ipv4, ipv6);
+        assert_eq!(dns.resolve_ip(&ipv4).map(String::as_str), Some("dual.example"));
+        assert_eq!(dns.resolve_ip(&ipv6).map(String::as_str), Some("dual.example"));
+
+        let a_response = Message::from_vec(&a_response).unwrap();
+        let aaaa_response = Message::from_vec(&aaaa_response).unwrap();
+        assert!(matches!(a_response.answers[0].data, hickory_proto::rr::RData::A(_)));
+        assert!(matches!(aaaa_response.answers[0].data, hickory_proto::rr::RData::AAAA(_)));
     }
 
     #[test]
