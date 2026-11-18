@@ -1770,7 +1770,7 @@ mod proxy_connection_timeout_tests {
         .await
         .unwrap_err();
 
-        assert!(error.to_string().contains("handshake timed out"));
+        assert!(error.to_string().contains("SOCKS5 negotiation timed out"));
         assert!(started.elapsed() < Duration::from_millis(500));
         server_task.abort();
     }
