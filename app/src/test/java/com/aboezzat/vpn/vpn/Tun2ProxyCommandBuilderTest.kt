@@ -23,7 +23,9 @@ class Tun2ProxyCommandBuilderTest {
         assertTrue(command.contains("'--close-fd-on-drop' 'false'"))
         assertTrue(command.contains("'--proxy' 'http://proxy.example:8080'"))
         assertTrue(command.contains("'--dns' 'virtual'"))
-        assertTrue(command.contains("'--ipv6-enabled'"))
+        // IPv6 stays routed by Android's TUN, but AAAA answers are filtered
+        // until this upstream proxy can relay IPv6 destination literals.
+        assertTrue(!command.contains("'--ipv6-enabled'"))
         assertTrue(command.contains("'--mtu' '1500'"))
         assertTrue(command.contains("'--tcp-mss' '1440'"))
         assertTrue(!command.contains("'--udp-enabled'"))
