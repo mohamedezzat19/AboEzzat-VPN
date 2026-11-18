@@ -99,10 +99,14 @@ impl SocksProxyImpl {
 
     fn send_client_hello_socks5(&mut self) -> Result<(), Error> {
         let credentials = &self.credentials;
-        let mut methods = vec![AuthMethod::NoAuth, AuthMethod::from(4_u8), AuthMethod::from(100_u8)];
-        if credentials.is_some() {
-            methods.push(AuthMethod::UserPass);
-        }
+        // Advertise only authentication methods this client can actually
+        // complete. Offering proprietary/unsupported method IDs can cause
+        // strict SOCKS5 servers to reject the greeting before CONNECT.
+        let methods = if credentials.is_some() {
+            vec![AuthMethod::NoAuth, AuthMethod::UserPass]
+        } else {
+            vec![AuthMethod::NoAuth]
+        };
         handshake::Request::new(methods).write_to_stream(&mut self.server_outbuf)?;
         Ok(())
     }
@@ -410,6 +414,34 @@ mod tests {
             })
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn socks5_greeting_offers_only_supported_methods_without_credentials() {
+        let src = "127.0.0.1:12345".parse().unwrap();
+        let dst = "192.0.2.1:443".parse().unwrap();
+        let handler = SocksProxyImpl::new(
+            "127.0.0.1:1080".parse().unwrap(),
+            SessionInfo::new(src, dst, IpProtocol::Tcp),
+            None,
+            None,
+            Version::V5,
+            Command::Connect,
+        )
+        .unwrap();
+        assert_eq!(
+            handler.server_outbuf.iter().copied().collect::<Vec<_>>(),
+            vec![0x05, 0x01, 0x00]
+        );
+    }
+
+    #[test]
+    fn socks5_greeting_offers_supported_password_method_with_credentials() {
+        let handler = socks5_handler();
+        assert_eq!(
+            handler.server_outbuf.iter().copied().collect::<Vec<_>>(),
+            vec![0x05, 0x02, 0x00, 0x02]
+        );
     }
 
     #[tokio::test]
