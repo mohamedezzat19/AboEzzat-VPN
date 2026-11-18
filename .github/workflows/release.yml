@@ -1,4 +1,4 @@
-name: Release
+name: AboEzzat Proxy Release
 on:
   workflow_dispatch:
     inputs:
@@ -16,10 +16,10 @@ jobs:
     name: Build and publish a release
     runs-on: ubuntu-latest
     env:
-      SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
-      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
-      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+      SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 || secrets.ANDROID_KEYSTORE_BASE64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD || secrets.ANDROID_KEYSTORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS || secrets.ANDROID_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD || secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -58,7 +58,7 @@ jobs:
         if: ${{ !inputs.publish }}
         uses: actions/upload-artifact@v7
         with:
-          name: Throne-${{ steps.version.outputs.tag }}
+          name: AboEzzat-Proxy-${{ steps.version.outputs.tag }}
           path: dist/
           if-no-files-found: error
           retention-days: 14
