@@ -6,11 +6,7 @@
 
 **Android proxy client by AboEzzat, powered by [sing-box](https://github.com/SagerNet/sing-box)**
 
-[![Release](https://img.shields.io/github/v/release/throneproj/ThroneForAndroid?style=flat-square&label=release&color=2F80ED)](https://github.com/throneproj/ThroneForAndroid/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/throneproj/ThroneForAndroid/total?style=flat-square&logo=github&label=downloads)](https://github.com/throneproj/ThroneForAndroid/releases)
-[![Stars](https://img.shields.io/github/stars/throneproj/ThroneForAndroid?style=flat-square&logo=github&label=stars)](https://github.com/throneproj/ThroneForAndroid/stargazers)
-[![License](https://img.shields.io/github/license/throneproj/ThroneForAndroid?style=flat-square&color=6E7781)](LICENSE)
-[![Telegram](https://img.shields.io/badge/Telegram-@ThroneProj-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/ThroneProj)
+[![License](https://img.shields.io/github/license/mohamedezzat19/AboEzzat-VPN?style=flat-square&color=6E7781)](LICENSE)
 
 </div>
 
