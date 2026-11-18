@@ -35,8 +35,11 @@ internal object Tun2ProxyCommandBuilder {
             "--close-fd-on-drop", "false",
             "--proxy", proxyUrl,
             "--dns", dnsMode,
-            // Keep IPv6 routed inside the VPN, but do not advertise IPv6 DNS answers
-            // until the selected upstream SOCKS server is verified to relay IPv6 literals.
+            // With virtual DNS, IPv6 answers are synthetic addresses mapped back
+            // to the original hostname. This makes SOCKS5/HTTP CONNECT receive the
+            // hostname instead of an unresolvable raw IPv6 literal; the proxy resolves
+            // the destination remotely. Do not enable this with local/over-TCP DNS,
+            // where the original hostname-to-address mapping is unavailable.
             "--mtu", mtu.toString(),
             // Advertise an MSS safe for both IPv4 and IPv6 (MTU - 60).
             // Without this, the userspace TCP stack omits MSS and peers may
@@ -44,6 +47,10 @@ internal object Tun2ProxyCommandBuilder {
             "--tcp-mss", (mtu - 60).toString(),
             "--verbosity", "info"
         )
+
+        if (profile.remoteDns) {
+            arguments += "--ipv6-enabled"
+        }
 
         // The native engine intentionally drops non-DNS UDP unless opted in.
         // Android Proxy Server's SOCKS5 UDP ASSOCIATE path is tested separately,
