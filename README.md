@@ -1,38 +1,83 @@
-# AboEzzat Proxy
+<div align="center">
 
-Android client for routing device traffic through an upstream proxy using Android VPN Service, TUN, and the native tun2proxy engine.
+<img src=".github/images/logo.png" width="128" alt="Throne logo">
 
-**Important architecture boundary:** this repository is the Android proxy client. It does not implement the proxy server on the first phone. The first phone must run a compatible HTTP CONNECT or SOCKS5 server.
+# Throne for Android
 
-## Current implementation
+**Android proxy client, powered by [sing-box](https://github.com/SagerNet/sing-box)**
 
-- Android `VpnService` creates a TUN interface.
-- The TUN traffic is handled by the vendored `tun2proxy` Rust engine, pinned to upstream `v0.8.7`.
-- Native TCP/UDP sockets are protected through the app-owned JNI callback to `VpnService.protect(fd)`; protection failure is fail-closed.
-- HTTP CONNECT carries TCP only.
-- SOCKS5 carries TCP and can use UDP ASSOCIATE when the upstream server implements it.
-- IPv4 and IPv6 routes are installed by the current VPN path.
-- Direct bypass uses Android's `addDisallowedApplication`. The other displayed route labels are not independent routing engines yet.
+[![Release](https://img.shields.io/github/v/release/throneproj/ThroneForAndroid?style=flat-square&label=release&color=2F80ED)](https://github.com/throneproj/ThroneForAndroid/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/throneproj/ThroneForAndroid/total?style=flat-square&logo=github&label=downloads)](https://github.com/throneproj/ThroneForAndroid/releases)
+[![Stars](https://img.shields.io/github/stars/throneproj/ThroneForAndroid?style=flat-square&logo=github&label=stars)](https://github.com/throneproj/ThroneForAndroid/stargazers)
+[![License](https://img.shields.io/github/license/throneproj/ThroneForAndroid?style=flat-square&color=6E7781)](LICENSE)
+[![Telegram](https://img.shields.io/badge/Telegram-@ThroneProj-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/ThroneProj)
 
-## Current limitations being audited
+</div>
 
-- The app does not yet provide a complete standalone, device-wide proxy-only mode. Its direct proxy checks are preflight tests; Android-wide app capture requires the VPN stage.
-- Virtual DNS synthesizes A/AAAA records and forwards other DNS record types (including TCP fallback) through the upstream proxy.
-- A successful SOCKS5 UDP DNS test proves that one DNS datagram received an answer; it does not prove every UDP application or QUIC flow works.
-- The current TUN MTU is 1500 and the engine's default maximum concurrent sessions is 200. Neither should be changed without measurements on the actual hotspot/MikroTik path.
-- Non-TCP/UDP IP transports are not forwarded by the current userspace engine.
-- Physical-device end-to-end tests are still required; host unit tests and Android compilation do not prove that every app works.
+Throne for Android manages proxy profiles and subscriptions, routes traffic with rule-based routing profiles, and works either as a VPN or as a proxy-only service. It shares [Throne](https://github.com/throneproj/Throne) desktop's core and data model, so profiles, share links, route profiles and `.thrbackup` backups move freely between the two. See the [documentation](https://throneproj.github.io) for guides.
 
-The authoritative findings and staged plan are in [docs/NETWORKING_AUDIT_AND_ROADMAP.md](docs/NETWORKING_AUDIT_AND_ROADMAP.md). The vendored engine provenance is in [native/tun2proxy/UPSTREAM.md](native/tun2proxy/UPSTREAM.md).
+<p align="center">
+  <img width="300" alt="Throne for Android main screen" src=".github/images/screenshot.png" />
+</p>
 
-## Recovery plan
+## Installation
 
-1. **Proxy-only baseline:** use the in-app WebView browser with AndroidX ProxyController (HTTP or SOCKS proxy) without starting the TUN, then verify SOCKS5 CONNECT, DNS, and real UDP ASSOCIATE responses. The WebView proxy override applies only to WebViews in this app; other apps are unaffected.
-2. **Proxy + VPN:** after the proxy baseline passes, route device traffic through the TUN and verify DNS, TCP, UDP/QUIC, IPv4/IPv6, session cleanup, and network changes.
-3. **Country/egress selection:** only after the first two stages are stable, add an external egress VPN or proxy endpoint in the selected country and verify the public exit IP.
+APKs for arm64-v8a, armeabi-v7a and x86_64 are on [GitHub Releases](https://github.com/throneproj/ThroneForAndroid/releases), with a `SHA256SUMS` file to verify them. Throne runs on Android 7.0 (API 24) or newer, including Android TV.
 
-## Releases
+### Upgrading from 1.x
+Releases from v2.0.0 on are signed with a new key, so Android refuses to install them over a 1.x release (signature conflict). Uninstall the old release first, then import your subscriptions and profiles again: old local configurations are not migrated.
 
-GitHub Actions builds signed **Release APKs only** for main-branch updates. The workflow runs Rust tests, Android ABI checks, Gradle release unit tests, signing validation, and publishes the release asset for the in-app updater.
+## Supported protocols
 
-Do not treat a successful build as proof that all network protocols work. Release validation and real-device network validation are separate gates.
+- SOCKS
+- HTTP(S)
+- Shadowsocks
+- Trojan
+- VMess
+- VLESS
+- TUIC
+- Hysteria
+- Hysteria2
+- AnyTLS
+- Mieru
+- Snell
+- NaïveProxy
+- Juicity
+- TrustTunnel
+- ShadowTLS
+- Wireguard
+- AmneziaWG
+- MASQUE
+- SSH
+- DNSTT / VayDNS
+- MasterDNS
+- Xray VLESS (XHTTP/XDrive)
+- OpenVPN/OpenConnect
+- Custom Outbound (Both Sing-box and Xray)
+- Custom Config (Both Sing-box and Xray)
+- Chaining outbounds
+
+## Subscription Formats
+
+Various formats are supported, including share links, various JSON representation of Sing-box configs, and v2rayN link format as well as limited support for Shadowsocks and Clash formats.
+
+Deeplinks are also supported, read the [documentation](https://throneproj.github.io/advanced/deeplinks/) for more information.
+
+## Credits
+
+- [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
+- [XTLS/Xray-core](https://github.com/xtls/xray-core)
+- [SagerNet/sing-box-dashboard](https://github.com/SagerNet/sing-box-dashboard)
+- [MatsuriDayo/NekoBoxForAndroid](https://github.com/MatsuriDayo/NekoBoxForAndroid)
+- [SagerNet/SagerNet](https://github.com/SagerNet/SagerNet)
+- [shadowsocks/shadowsocks-android](https://github.com/shadowsocks/shadowsocks-android)
+
+## Supporting Throne
+
+If Throne is useful to you, you can support its development through [GitHub Sponsors](https://github.com/sponsors/Mahdi-zarei) or with a crypto donation to one of these addresses:
+
+| Coin | Network | Address |
+|:--|:--|:--|
+| **USDT** · **TRX** | TRON (TRC20) | `THR2gbWMaTZh8ACk3VYAAyNRVffvdTRikj` |
+| **USDT** · **USDC** | BNB Smart Chain (BEP20) · Ethereum (ERC20) | `0x7c2dF1867f5AaEE807a835fB3c55E4de4507888A` |
+| **XMR** | Monero | `4AYwwN8qMQCSUb3XfwzfrLNPMHfDme6U7CmNtQY4idCF8GtHHLG68VA3iZK867ypuKFr8J7CjXiJ96eFUA2T6aLVRUbgY3A` |
