@@ -313,7 +313,7 @@ mod virtual_dns_ipv6_filter_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux", feature = "unshare"))]
 mod socket_request_retry_tests {
     use super::*;
 
