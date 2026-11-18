@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src=".github/images/logo.png" width="128" alt="Throne logo">
+<img src=".github/images/logo.png" width="128" alt="AboEzzat Proxy logo">
 
-# Throne for Android
+# AboEzzat Proxy
 
-**Android proxy client, powered by [sing-box](https://github.com/SagerNet/sing-box)**
+**Android proxy client by AboEzzat, powered by [sing-box](https://github.com/SagerNet/sing-box)**
 
 [![Release](https://img.shields.io/github/v/release/throneproj/ThroneForAndroid?style=flat-square&label=release&color=2F80ED)](https://github.com/throneproj/ThroneForAndroid/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/throneproj/ThroneForAndroid/total?style=flat-square&logo=github&label=downloads)](https://github.com/throneproj/ThroneForAndroid/releases)
@@ -14,15 +14,15 @@
 
 </div>
 
-Throne for Android manages proxy profiles and subscriptions, routes traffic with rule-based routing profiles, and works either as a VPN or as a proxy-only service. It shares [Throne](https://github.com/throneproj/Throne) desktop's core and data model, so profiles, share links, route profiles and `.thrbackup` backups move freely between the two. See the [documentation](https://throneproj.github.io) for guides.
+AboEzzat Proxy is an Android proxy client based on the upstream Throne for Android project. It manages proxy profiles and subscriptions, routes traffic with rule-based routing profiles, and works either as a VPN or as a proxy-only service. It is powered by sing-box and retains upstream protocol support and attribution. See the [upstream documentation](https://throneproj.github.io) for guides.
 
 <p align="center">
-  <img width="300" alt="Throne for Android main screen" src=".github/images/screenshot.png" />
+  <img width="300" alt="AboEzzat Proxy main screen" src=".github/images/screenshot.png" />
 </p>
 
 ## Installation
 
-APKs for arm64-v8a, armeabi-v7a and x86_64 are on [GitHub Releases](https://github.com/throneproj/ThroneForAndroid/releases), with a `SHA256SUMS` file to verify them. Throne runs on Android 7.0 (API 24) or newer, including Android TV.
+Release APKs will be published in this repository after signing and release configuration are completed. The upstream app supports Android 7.0 (API 24) or newer, including Android TV.
 
 ### Upgrading from 1.x
 Releases from v2.0.0 on are signed with a new key, so Android refuses to install them over a 1.x release (signature conflict). Uninstall the old release first, then import your subscriptions and profiles again: old local configurations are not migrated.
@@ -72,7 +72,7 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
 - [SagerNet/SagerNet](https://github.com/SagerNet/SagerNet)
 - [shadowsocks/shadowsocks-android](https://github.com/shadowsocks/shadowsocks-android)
 
-## Supporting Throne
+## Upstream project and attribution
 
 If Throne is useful to you, you can support its development through [GitHub Sponsors](https://github.com/sponsors/Mahdi-zarei) or with a crypto donation to one of these addresses:
 
