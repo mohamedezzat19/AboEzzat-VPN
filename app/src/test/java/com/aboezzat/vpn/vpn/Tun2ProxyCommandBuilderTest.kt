@@ -23,9 +23,9 @@ class Tun2ProxyCommandBuilderTest {
         assertTrue(command.contains("'--close-fd-on-drop' 'false'"))
         assertTrue(command.contains("'--proxy' 'http://proxy.example:8080'"))
         assertTrue(command.contains("'--dns' 'virtual'"))
-        // IPv6 stays routed by Android's TUN, but AAAA answers are filtered
-        // until this upstream proxy can relay IPv6 destination literals.
-        assertTrue(!command.contains("'--ipv6-enabled'"))
+        // Virtual IPv6 DNS uses synthetic addresses mapped back to hostnames,
+        // so the upstream proxy receives a domain rather than a raw IPv6 literal.
+        assertTrue(command.contains("'--ipv6-enabled'"))
         assertTrue(command.contains("'--mtu' '1500'"))
         assertTrue(command.contains("'--tcp-mss' '1440'"))
         assertTrue(!command.contains("'--udp-enabled'"))
@@ -64,6 +64,22 @@ class Tun2ProxyCommandBuilderTest {
         val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 8)
 
         assertTrue(command!!.contains("'--dns' 'over-tcp'"))
+    }
+
+    @Test
+    fun enablesIpv6VirtualDnsForSocks5RemoteDns() {
+        val profile = ProxyProfile(
+            name = "SOCKS remote DNS",
+            host = "proxy.example",
+            port = 1080,
+            protocol = ProxyProtocol.SOCKS5,
+            remoteDns = true
+        )
+
+        val command = Tun2ProxyCommandBuilder.build(profile, tunFd = 10)
+
+        assertTrue(command!!.contains("'--dns' 'virtual'"))
+        assertTrue(command.contains("'--ipv6-enabled'"))
     }
 
     @Test
