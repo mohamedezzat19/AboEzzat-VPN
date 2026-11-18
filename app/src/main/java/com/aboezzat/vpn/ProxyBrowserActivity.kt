@@ -152,6 +152,10 @@ class ProxyBrowserActivity : AppCompatActivity() {
         browser = webView
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
+        // Respect each site's responsive <meta name="viewport"> instead of
+        // laying pages out at the WebView's legacy desktop-width default.
+        webView.settings.useWideViewPort = true
+        webView.settings.loadWithOverviewMode = false
         webView.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 progress?.progress = newProgress
