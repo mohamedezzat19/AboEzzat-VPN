@@ -35,7 +35,8 @@ internal object Tun2ProxyCommandBuilder {
             "--close-fd-on-drop", "false",
             "--proxy", proxyUrl,
             "--dns", dnsMode,
-            "--ipv6-enabled",
+            // Keep IPv6 routed inside the VPN, but do not advertise IPv6 DNS answers
+            // until the selected upstream SOCKS server is verified to relay IPv6 literals.
             "--mtu", mtu.toString(),
             // Advertise an MSS safe for both IPv4 and IPv6 (MTU - 60).
             // Without this, the userspace TCP stack omits MSS and peers may
