@@ -20,19 +20,17 @@ import java.io.IOException
 import java.io.InputStream
 
 /**
- * GitHub releases of ThroneForAndroid (the desktop's CheckUpdate: `allow_beta_update` admits pre-releases). A release
- * built by CI carries `throne-update.json` (buildScript/release_assets.py) and can be installed in-app; older releases
- * are offered in the browser only.
+ * GitHub releases of AboEzzat Proxy. A release built by CI carries the AboEzzat Proxy update manifest and can be installed in-app; older releases are offered in the browser only.
  */
 object UpdateChecker {
 
-    const val REPOSITORY = "throneproj/ThroneForAndroid"
+    const val REPOSITORY = "mohamedezzat19/AboEzzat-VPN"
     const val RELEASES_PAGE = "https://github.com/$REPOSITORY/releases"
     private const val RELEASES_API = "https://api.github.com/repos/$REPOSITORY/releases?per_page=20"
 
     // The API host, not raw.githubusercontent.com, which is blocked where the releases call still works (as desktop).
     private const val CHANGELOG_API = "https://api.github.com/repos/$REPOSITORY/contents/CHANGELOG.md"
-    private const val MANIFEST = "throne-update.json"
+    private const val MANIFEST = "aboezzat-proxy-update.json"
     private const val MAX_MANIFESTS = 5
     private const val MAX_MANIFEST_BYTES = 256 * 1024
     private const val MAX_CHANGELOG_BYTES = 1024 * 1024
