@@ -278,6 +278,43 @@ fn create_socket_queue(socket: Arc<Mutex<tokio::net::UnixDatagram>>, ipv6_enable
 
 #[cfg(all(target_os = "linux", feature = "unshare"))]
 #[cfg(test)]
+mod virtual_dns_ipv6_filter_tests {
+    use super::*;
+    use hickory_proto::{
+        op::{Message, MessageType, OpCode, Query},
+        rr::{Name, RData, RecordType},
+    };
+    use std::str::FromStr;
+
+    fn synthetic_aaaa_response() -> Vec<u8> {
+        let mut message = Message::new(7, MessageType::Response, OpCode::Query);
+        message.add_query(Query::query(Name::from_str("example.org.").unwrap(), RecordType::AAAA));
+        message.add_answer(hickory_proto::rr::Record::from_rdata(
+            Name::from_str("example.org.").unwrap(),
+            5,
+            RData::AAAA(hickory_proto::rr::rdata::AAAA("2001:db8::1".parse().unwrap())),
+        ));
+        message.to_vec().unwrap()
+    }
+
+    #[test]
+    fn strips_synthetic_aaaa_when_ipv6_upstream_is_disabled() {
+        let filtered = filter_virtual_dns_response(synthetic_aaaa_response(), false).unwrap();
+        let message = dns::parse_data_to_dns_message(&filtered, false).unwrap();
+        assert!(message.answers.is_empty());
+        assert_eq!(message.queries[0].query_type(), hickory_proto::rr::RecordType::AAAA);
+    }
+
+    #[test]
+    fn preserves_synthetic_aaaa_when_ipv6_is_enabled() {
+        let filtered = filter_virtual_dns_response(synthetic_aaaa_response(), true).unwrap();
+        let message = dns::parse_data_to_dns_message(&filtered, false).unwrap();
+        assert_eq!(message.answers.len(), 1);
+        assert!(matches!(message.answers[0].data, RData::AAAA(_)));
+    }
+}
+
+#[cfg(test)]
 mod socket_request_retry_tests {
     use super::*;
 
@@ -823,7 +860,7 @@ async fn handle_virtual_dns_tcp_session(
             let response = if synthetic_query {
                 let (response, qname, ip) = dns.lock().await.generate_query(&query)?;
                 log::debug!("Virtual DNS-over-TCP query: {qname} -> {ip}");
-                response
+                filter_virtual_dns_response(response, ipv6_enabled)?
             } else {
                 let qtype = dns_query_type_label(&query);
                 let connect_started = Instant::now();
@@ -867,6 +904,18 @@ async fn handle_virtual_dns_tcp_session(
         }
     }
     Ok(())
+}
+
+/// When IPv6 forwarding is unavailable on the selected upstream, keep the
+/// DNS response usable by returning no AAAA records. IPv6 packets remain
+/// routed into the TUN (never bypassing the VPN); clients can retry via A.
+fn filter_virtual_dns_response(response: Vec<u8>, ipv6_enabled: bool) -> crate::Result<Vec<u8>> {
+    if ipv6_enabled {
+        return Ok(response);
+    }
+    let mut message = dns::parse_data_to_dns_message(&response, false)?;
+    dns::remove_ipv6_entries(&mut message);
+    Ok(message.to_vec()?)
 }
 
 async fn forward_dns_query_over_tcp<S>(
@@ -937,7 +986,7 @@ async fn handle_virtual_dns_session(
         let response = if synthetic_query {
             let (message, qname, ip) = dns.lock().await.generate_query(query)?;
             log::debug!("Virtual DNS query: {qname} -> {ip}");
-            message
+            filter_virtual_dns_response(message, ipv6_enabled)?
         } else {
             // Preserve SRV/TXT/HTTPS/SVCB and other records by asking the real
             // resolver through the same proxy. Never fall back to device DNS.
