@@ -426,11 +426,12 @@ async fn open_proxy_connection_with_timeouts(
         std::io::Error::new(
             ErrorKind::TimedOut,
             format!(
-                "Upstream proxy handshake timed out after {} ms",
+                "SOCKS5 negotiation timed out after {} ms",
                 handshake_timeout.as_millis()
             ),
         )
-    })??;
+    })?
+    .map_err(|error| format!("SOCKS5 negotiation failed: {error}"))?;
 
     Ok((server, udp_addr))
 }
@@ -1010,9 +1011,13 @@ async fn handle_tcp_session(
     proxy_handler: Arc<Mutex<dyn ProxyHandler>>,
     socket_queue: Option<Arc<SocketQueue>>,
 ) -> crate::Result<()> {
-    let (session_info, server_addr) = {
+    let (session_info, server_addr, domain_routed) = {
         let handler = proxy_handler.lock().await;
-        (handler.get_session_info(), handler.get_server_addr())
+        (
+            handler.get_session_info(),
+            handler.get_server_addr(),
+            handler.get_domain_name().is_some(),
+        )
     };
 
     log::info!("TCP flow {session_info}: opening upstream proxy socket to {server_addr}");
@@ -1020,8 +1025,11 @@ async fn handle_tcp_session(
     let (server, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
         Ok(connection) => connection,
         Err(error) => {
+            let destination_family = if session_info.dst.is_ipv4() { "ipv4" } else { "ipv6" };
             report_native_diagnostic(&format!(
-                "TCP upstream failed: stage=proxy_connect_or_handshake, error={error}"
+                "TCP upstream failed: destination_family={destination_family}, destination_port={}, destination_type={}, error={error}",
+                session_info.dst.port(),
+                if domain_routed { "domain" } else { "ip" },
             ));
             log::warn!("TCP flow {session_info}: upstream proxy connect/handshake failed: {error}");
             if let Err(shutdown_error) = tcp_stack.shutdown().await {
@@ -1030,8 +1038,11 @@ async fn handle_tcp_session(
             return Err(error);
         }
     };
+    let destination_family = if session_info.dst.is_ipv4() { "ipv4" } else { "ipv6" };
     report_native_diagnostic(&format!(
-        "TCP upstream success: stage=proxy_connect_and_handshake, elapsed_ms={}",
+        "TCP upstream success: destination_family={destination_family}, destination_port={}, destination_type={}, elapsed_ms={}",
+        session_info.dst.port(),
+        if domain_routed { "domain" } else { "ip" },
         connect_started.elapsed().as_millis()
     ));
     log::info!("TCP flow {session_info}: upstream proxy CONNECT established; starting bidirectional relay");
