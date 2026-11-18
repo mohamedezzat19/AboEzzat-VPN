@@ -1016,9 +1016,13 @@ async fn handle_tcp_session(
     };
 
     log::info!("TCP flow {session_info}: opening upstream proxy socket to {server_addr}");
+    let connect_started = Instant::now();
     let (server, _) = match open_proxy_connection(&socket_queue, proxy_handler).await {
         Ok(connection) => connection,
         Err(error) => {
+            report_native_diagnostic(&format!(
+                "TCP upstream failed: stage=proxy_connect_or_handshake, error={error}"
+            ));
             log::warn!("TCP flow {session_info}: upstream proxy connect/handshake failed: {error}");
             if let Err(shutdown_error) = tcp_stack.shutdown().await {
                 log::debug!("TCP flow {session_info}: shutdown after proxy failure: {shutdown_error}");
@@ -1026,6 +1030,10 @@ async fn handle_tcp_session(
             return Err(error);
         }
     };
+    report_native_diagnostic(&format!(
+        "TCP upstream success: stage=proxy_connect_and_handshake, elapsed_ms={}",
+        connect_started.elapsed().as_millis()
+    ));
     log::info!("TCP flow {session_info}: upstream proxy CONNECT established; starting bidirectional relay");
 
     let (mut t_rx, mut t_tx) = tokio::io::split(tcp_stack);
@@ -1053,11 +1061,15 @@ async fn handle_tcp_session(
 
     match relay_result {
         Ok((client_to_proxy, proxy_to_client)) => {
+            report_native_diagnostic(&format!(
+                "TCP relay success: client_to_proxy_bytes={client_to_proxy}, proxy_to_client_bytes={proxy_to_client}"
+            ));
             log::info!("TCP flow {session_info}: client -> proxy finished ({client_to_proxy} bytes)");
             log::info!("TCP flow {session_info}: proxy -> client finished ({proxy_to_client} bytes)");
             Ok(())
         }
         Err(error) => {
+            report_native_diagnostic(&format!("TCP relay failed: error={error}"));
             log::warn!("TCP flow {session_info}: relay failed; both directions are being closed: {error}");
             Err(error.into())
         }
