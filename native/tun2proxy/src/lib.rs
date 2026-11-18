@@ -276,7 +276,6 @@ fn create_socket_queue(socket: Arc<Mutex<tokio::net::UnixDatagram>>, ipv6_enable
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "unshare"))]
 #[cfg(test)]
 mod virtual_dns_ipv6_filter_tests {
     use super::*;
