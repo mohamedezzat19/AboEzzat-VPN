@@ -1,3 +1,8 @@
+#### 1.0.0
+
+* Initial AboEzzat Proxy release, based on Throne for Android.
+* Retain upstream license, notices, and third-party attributions.
+
 #### 2.0.7
 
 * Add Service check **1**
