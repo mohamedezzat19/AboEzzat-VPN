@@ -1,3 +1,8 @@
+#### 1.0.1
+
+* Redirect in-app update checks, release downloads, and changelog links to the AboEzzat Proxy repository.
+* Keep the AboEzzat Proxy identity and package for future updates.
+
 #### 1.0.0
 
 * Initial AboEzzat Proxy release, based on Throne for Android.
