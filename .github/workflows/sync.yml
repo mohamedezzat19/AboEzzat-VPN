@@ -26,7 +26,7 @@ jobs:
 
       - name: Import complete upstream source tree
         env:
-          SOURCE_COMMIT: "e57a18f2f51137b3da3f789dd336fe5b1062222c"
+          SOURCE_COMMIT: "0f3c1ca18e8af5b437d95aa0b0f36d1d5eedab51"
         run: |
           set -euo pipefail
           git clone https://github.com/throneproj/ThroneForAndroid.git "$RUNNER_TEMP/throne"
@@ -44,5 +44,5 @@ jobs:
             echo "Target tree already matches the pinned upstream source."
             exit 0
           fi
-          git commit -m "Import complete Throne for Android source (\${SOURCE_COMMIT})"
+          git commit -m "Import complete Throne for Android source ($SOURCE_COMMIT)"
           git push origin HEAD:main
